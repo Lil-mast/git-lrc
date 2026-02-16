@@ -49,7 +49,7 @@ export async function createPrecommitBar() {
         return html`
             <div class="precommit-bar">
                 <div class="precommit-bar-left">
-                    <div class="precommit-bar-title">Pre-commit action</div>
+                    <div class="precommit-bar-title">Git action</div>
                     <div class="precommit-actions">
                         <button 
                             class="btn btn-primary"
