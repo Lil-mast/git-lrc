@@ -1,3 +1,5 @@
+import { generateFriendlyConnectorName } from '/static/ui-connectors/name-utils.js';
+
 export const providers = [
   {
     id: 'gemini',
@@ -26,8 +28,8 @@ export const providers = [
   {
     id: 'openai',
     name: 'OpenAI',
-    defaultModel: 'gpt-4',
-    models: ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', 'gpt-4o'],
+    defaultModel: 'o4-mini',
+    models: ['o4-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o-mini', 'gpt-4o', 'o3-mini'],
     apiKeyPlaceholder: 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
   },
   {
@@ -51,7 +53,7 @@ export function defaultForm() {
   return {
     id: '',
     provider_name: first.id,
-    connector_name: `${first.name} Connector`,
+    connector_name: generateFriendlyConnectorName(first.id, providers),
     api_key: '',
     base_url: '',
     selected_model: first.defaultModel,

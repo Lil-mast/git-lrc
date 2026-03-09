@@ -16,7 +16,9 @@ export function ConnectorFormPage({
   onFieldChange,
   onFetchOllamaModels,
   onSave,
+  onGenerateName,
   onCancel,
+  connectorNamePlaceholder,
 }) {
   const isOllama = form.provider_name === 'ollama';
   const showBaseURL = Boolean(selectedProvider.requiresBaseURL);
@@ -53,11 +55,17 @@ export function ConnectorFormPage({
           </select>
 
           <label>Connector Name</label>
-          <input
-            value=${form.connector_name}
-            required
-            onInput=${(event) => onFieldChange('connector_name', event.target.value)}
-          />
+          <div class="connector-name-row">
+            <input
+              value=${form.connector_name}
+              required
+              placeholder=${connectorNamePlaceholder || 'Enter a connector name'}
+              onInput=${(event) => onFieldChange('connector_name', event.target.value)}
+            />
+            <button class="secondary subtle-action" onClick=${onGenerateName} title="Generate a smart connector name">
+              Regenerate
+            </button>
+          </div>
 
           <label>${isOllama ? 'JWT Token (optional)' : 'API Key'}</label>
           <input
@@ -132,7 +140,11 @@ export function ConnectorFormPage({
                         value=${form.selected_model}
                         onChange=${(event) => onFieldChange('selected_model', event.target.value)}
                       >
-                        ${modelOptions.map((model) => html`<option value=${model}>${model}</option>`)}
+                        ${modelOptions.map((model) => html`
+                          <option value=${model}>
+                            ${model}${model === selectedProvider.defaultModel ? ' (Recommended)' : ''}
+                          </option>
+                        `)}
                       </select>
                     `
                   : html`<input value=${form.selected_model} onInput=${(event) => onFieldChange('selected_model', event.target.value)} />`}

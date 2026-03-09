@@ -127,6 +127,23 @@
     button.tertiary-danger:hover { background: var(--status-error-bg); }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
     .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .connector-name-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .connector-name-row input {
+      margin-bottom: 0;
+      min-width: 0;
+    }
+    .subtle-action {
+      font-size: 12px;
+      padding: 8px 10px;
+      white-space: nowrap;
+      opacity: 0.92;
+    }
     .status { margin-top: 8px; font-size: 13px; }
     .status.ok { color: var(--status-success-text); }
     .status.err { color: var(--status-error-text); }
