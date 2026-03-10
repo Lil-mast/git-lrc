@@ -257,8 +257,8 @@ If it helps you — **share it with your developer friends.** The more people re
 Pick the right place based on what you need:
 
 - **Discord**: [discord.gg/R5PX8nCH](https://discord.gg/R5PX8nCH) - Best for joining the community, asking general Q&A, and having quick back-and-forth with the team.
-- **GitHub Discussions**: [github.com/HexmosTech/git-lrc/discussions](https://github.com/HexmosTech/git-lrc/discussions) - Best for in-depth idea proposals, scoping, design discussions, modification proposals, and constructive criticism.
-- **GitHub Issues**: [github.com/HexmosTech/git-lrc/issues](https://github.com/HexmosTech/git-lrc/issues) - Best for concrete, scoped tasks such as bugs, focused feature requests, and actionable implementation work.
+- **GitHub Discussions**: [github.com/HexmosTech/git-lrc/discussions](https://github.com/HexmosTech/git-lrc/discussions) - For in-depth idea proposals, scoping, design discussions, modification proposals, and constructive criticism.
+- **GitHub Issues**: [github.com/HexmosTech/git-lrc/issues](https://github.com/HexmosTech/git-lrc/issues) - For concrete, scoped tasks such as bugs, focused feature requests, and actionable implementation work.
 
 ## License
 

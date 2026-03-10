@@ -29,6 +29,27 @@ func handleCtrlKeyWithCancel(stop <-chan struct{}) (int, error) {
 		return 0, err
 	}
 
+	// Drain any stale buffered input (for example, the newline used to execute
+	// `lrc review`) so it cannot be misinterpreted as an immediate commit action.
+	{
+		drainBuf := make([]byte, 64)
+		for {
+			_, readErr := syscall.Read(fd, drainBuf)
+			if readErr == nil {
+				continue
+			}
+			if readErr == syscall.EAGAIN || readErr == syscall.EWOULDBLOCK {
+				break
+			}
+			if readErr == syscall.EINTR {
+				continue
+			}
+			_ = syscall.SetNonblock(fd, false)
+			_ = tty.Close()
+			return 0, readErr
+		}
+	}
+
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
 		tty.Close()
