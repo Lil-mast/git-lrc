@@ -670,15 +670,17 @@ async function initApp() {
                         logsCopied=${logsCopied}
                     />
                     
-                    <${SeverityFilter}
-                        files=${files}
-                        visibleSeverities=${visibleSeverities}
-                        onToggleSeverity=${toggleSeverity}
-                        onCopyVisibleIssues=${handleCopyVisibleIssues}
-                        hiddenCommentKeys=${hiddenCommentKeys}
-                        copyFeedbackStatus=${copyFeedback.status}
-                        copyFeedbackMessage=${copyFeedback.message}
-                    />
+                    ${activeTab === 'files' && html`
+                        <${SeverityFilter}
+                            files=${files}
+                            visibleSeverities=${visibleSeverities}
+                            onToggleSeverity=${toggleSeverity}
+                            onCopyVisibleIssues=${handleCopyVisibleIssues}
+                            hiddenCommentKeys=${hiddenCommentKeys}
+                            copyFeedbackStatus=${copyFeedback.status}
+                            copyFeedbackMessage=${copyFeedback.message}
+                        />
+                    `}
                     
                     <!-- Files Tab -->
                     <div id="files-tab" class="tab-content ${activeTab === 'files' ? 'active' : ''}" style="display: ${activeTab === 'files' ? 'block' : 'none'}">
