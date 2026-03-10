@@ -17,9 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knadh/koanf/parsers/toml"
-	"github.com/knadh/koanf/providers/rawbytes"
-	"github.com/knadh/koanf/v2"
 	"github.com/urfave/cli/v2"
 )
 
@@ -148,6 +145,7 @@ type setupResult struct {
 	Email        string
 	FirstName    string
 	LastName     string
+	AvatarURL    string
 	UserID       string
 	OrgID        string
 	OrgName      string
@@ -347,20 +345,21 @@ func backupExistingConfig(slog *setupLog) error {
 	configPath := filepath.Join(homeDir, ".lrc.toml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		slog.write("no existing config found")
-		return nil // file doesn't exist, nothing to back up
+		if os.IsNotExist(err) {
+			slog.write("no existing config found")
+			return nil
+		}
+		slog.write("failed to read existing config: %v", err)
+		return fmt.Errorf("failed to read existing config: %w", err)
 	}
 
-	// Parse TOML to check for a real api_key value (not just a comment)
-	k := koanf.New(".")
-	if err := k.Load(rawbytes.Provider(data), toml.Parser()); err == nil {
-		if k.String("api_key") == "" {
-			return nil // no api_key value, not a meaningful config
-		}
+	if strings.TrimSpace(string(data)) == "" {
+		slog.write("existing config is empty; skipping backup")
+		return nil
 	}
 
 	backupPath := configPath + ".bak." + time.Now().Format("20060102-150405")
-	if err := os.WriteFile(backupPath, data, 0600); err != nil {
+	if err := writeFileAtomically(backupPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to backup existing config: %w", err)
 	}
 
@@ -530,6 +529,7 @@ func provisionLiveReviewUser(cbData *hexmosCallbackData, slog *setupLog) (*setup
 		Email:        ensureResp.Email,
 		FirstName:    ensureResp.User.FirstName,
 		LastName:     ensureResp.User.LastName,
+		AvatarURL:    cbData.Result.Data.ProfilePicURL,
 		UserID:       ensureResp.UserID.String(),
 		OrgID:        ensureResp.OrgID.String(),
 		AccessToken:  ensureResp.Tokens.AccessToken,
@@ -737,8 +737,12 @@ func writeConfig(result *setupResult) error {
 api_key = %q
 api_url = %q
 user_email = %q
+user_first_name = %q
+user_last_name = %q
+avatar_url = %q
 user_id = %q
 org_id = %q
+org_name = %q
 jwt = %q
 refresh_token = %q
 `,
@@ -746,14 +750,49 @@ refresh_token = %q
 		result.PlainAPIKey,
 		cloudAPIURL,
 		result.Email,
+		result.FirstName,
+		result.LastName,
+		result.AvatarURL,
 		result.UserID,
 		result.OrgID,
+		result.OrgName,
 		result.AccessToken,
 		result.RefreshToken,
 	)
 
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
+	if err := writeFileAtomically(configPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".lrc-config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to write temporary file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to finalize temporary file: %w", err)
+	}
+
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to set permissions on temporary file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("failed to atomically replace %s: %w", path, err)
 	}
 
 	return nil

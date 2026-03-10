@@ -9,6 +9,7 @@ import { parseRoute, routePath, navigate } from '/static/ui-connectors/router.js
 import { HeaderNav } from '/static/ui-connectors/components/HeaderNav.js';
 import { Breadcrumbs } from '/static/ui-connectors/components/Breadcrumbs.js';
 import { HomePage } from '/static/ui-connectors/pages/HomePage.js';
+import { ProfilePage } from '/static/ui-connectors/pages/ProfilePage.js';
 import { ConnectorsPage } from '/static/ui-connectors/pages/ConnectorsPage.js';
 import { ConnectorFormPage } from '/static/ui-connectors/pages/ConnectorFormPage.js';
 
@@ -27,6 +28,8 @@ function App() {
   const [modelsFetched, setModelsFetched] = useState(false);
   const [form, setForm] = useState(defaultForm());
   const [ollamaModels, setOllamaModels] = useState([]);
+  const [session, setSession] = useState(null);
+  const [reauthInProgress, setReauthInProgress] = useState(false);
 
   const selectedProvider = useMemo(() => {
     return providers.find((provider) => provider.id === form.provider_name) || providers[0];
@@ -79,19 +82,76 @@ function App() {
       return `git-lrc Manager | AI Connectors | Edit Connector${label}`;
     }
 
+    if (route.name === 'profile') {
+      return 'git-lrc Manager | Profile';
+    }
+
     return 'git-lrc Manager | Home';
   }, [route.name, breadcrumbConnectorLabel]);
 
-  async function loadConnectors() {
+  async function loadSessionStatus(silent = false) {
+    try {
+      const nextSession = await api('/api/ui/session-status');
+      setSession(nextSession);
+      if (!nextSession.authenticated && !silent) {
+        setStatus('Session required for connector management');
+      }
+      return nextSession;
+    } catch (err) {
+      if (!silent) {
+        setError(err.message || String(err));
+      }
+      return null;
+    }
+  }
+
+  async function handleAuthError(err) {
+    if (Number(err && err.status) === 401) {
+      await loadSessionStatus(true);
+      setStatus('Session expired or missing. Use Re-authenticate in the header.');
+      setError('Session expired or missing.');
+      return true;
+    }
+    return false;
+  }
+
+  async function runReauthenticate() {
+    setReauthInProgress(true);
+    setError('');
+    setStatus('Starting browser login...');
+    try {
+      const result = await api('/api/ui/auth/reauth', { method: 'POST' });
+      setSession(result);
+      setStatus('Re-authentication complete');
+      await loadConnectors(true);
+      navigate('/connectors');
+    } catch (err) {
+      setError(err.message || String(err));
+      setStatus('Re-authentication failed');
+    } finally {
+      setReauthInProgress(false);
+    }
+  }
+
+  async function loadConnectors(force = false) {
     setLoading(true);
     setError('');
     try {
+      if (!force && session && !session.authenticated) {
+        setConnectors([]);
+        setDraftOrder([]);
+        setStatus('Authenticate to load connectors');
+        return;
+      }
       const data = await api('/api/ui/connectors');
       const sorted = [...data].sort((left, right) => (left.display_order || 0) - (right.display_order || 0));
       setConnectors(sorted);
       setDraftOrder(sorted.map((item) => String(item.id)));
       setStatus(`Loaded ${sorted.length} connector(s)`);
     } catch (err) {
+      if (await handleAuthError(err)) {
+        return;
+      }
       setError(err.message || String(err));
     } finally {
       setLoading(false);
@@ -99,7 +159,12 @@ function App() {
   }
 
   useEffect(() => {
-    loadConnectors();
+    (async () => {
+      const currentSession = await loadSessionStatus(true);
+      if (currentSession && currentSession.authenticated) {
+        await loadConnectors();
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -261,6 +326,9 @@ function App() {
       setStatus(`Fetched ${models.length} Ollama model(s)`);
     } catch (err) {
       setModelsFetched(false);
+      if (await handleAuthError(err)) {
+        return;
+      }
       setError(err.message || String(err));
     } finally {
       setFetchingModels(false);
@@ -362,9 +430,12 @@ function App() {
         setStatus('Connector created');
       }
       resetFormState();
-      await loadConnectors();
+      await loadConnectors(true);
       navigate('/connectors');
     } catch (err) {
+      if (await handleAuthError(err)) {
+        return;
+      }
       setError(err.message || String(err));
     } finally {
       setSaving(false);
@@ -380,8 +451,11 @@ function App() {
     try {
       await api(`/api/ui/connectors/${connectorId}`, { method: 'DELETE' });
       setStatus(`Connector #${connectorId} deleted`);
-      await loadConnectors();
+      await loadConnectors(true);
     } catch (err) {
+      if (await handleAuthError(err)) {
+        return;
+      }
       setError(err.message || String(err));
     }
   }
@@ -427,8 +501,11 @@ function App() {
         body: JSON.stringify(updates),
       });
       setStatus('Priority order saved');
-      await loadConnectors();
+      await loadConnectors(true);
     } catch (err) {
+      if (await handleAuthError(err)) {
+        return;
+      }
       setError(err.message || String(err));
     }
   }
@@ -464,6 +541,26 @@ function App() {
   }, [form]);
 
   function renderPage() {
+    if (!session || !session.authenticated) {
+      const sessionCard = html`
+        <div class="card session-banner">
+          <h2>Session Required</h2>
+          <p class="muted">${session && session.message ? session.message : 'Sign in to manage connectors.'}</p>
+          <div class="row">
+            <button onClick=${runReauthenticate} disabled=${reauthInProgress}>
+              ${reauthInProgress ? 'Reauthenticating...' : 'Re-authenticate'}
+            </button>
+          </div>
+        </div>
+      `;
+
+      if (route.name === 'home') {
+        return html`${sessionCard}<${HomePage} />`;
+      }
+
+      return sessionCard;
+    }
+
     if (route.name === 'connectors') {
       return html`<${ConnectorsPage}
         connectors=${connectors}
@@ -506,12 +603,25 @@ function App() {
       />`;
     }
 
+    if (route.name === 'profile') {
+      return html`<${ProfilePage}
+        session=${session}
+        onReauthenticate=${runReauthenticate}
+        reauthInProgress=${reauthInProgress}
+      />`;
+    }
+
     return html`<${HomePage} />`;
   }
 
   return html`
     <div class="wrap ui-shell">
-      <${HeaderNav} activePath=${activePath} />
+      <${HeaderNav}
+        activePath=${activePath}
+        session=${session}
+        reauthInProgress=${reauthInProgress}
+        onReauthenticate=${runReauthenticate}
+      />
       <${Breadcrumbs} route=${route} connectorName=${breadcrumbConnectorLabel} />
       ${error ? html`<div class="err-banner">${error}</div>` : ''}
       ${renderPage()}

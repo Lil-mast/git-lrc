@@ -13,6 +13,10 @@ export function parseRoute(hashValue) {
     return { name: 'connectors' };
   }
 
+  if (parts[0] === 'profile') {
+    return { name: 'profile' };
+  }
+
   return { name: 'home' };
 }
 
@@ -20,6 +24,7 @@ export function routePath(route) {
   if (route.name === 'connectors') return '/connectors';
   if (route.name === 'new') return '/connectors/new';
   if (route.name === 'edit' && route.connectorID) return `/connectors/edit/${route.connectorID}`;
+  if (route.name === 'profile') return '/profile';
   return '/home';
 }
 

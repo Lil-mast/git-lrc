@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,11 +31,19 @@ const (
 )
 
 type uiRuntimeConfig struct {
-	APIURL     string
-	JWT        string
-	RefreshJWT string
-	OrgID      string
-	ConfigPath string
+	APIURL        string
+	JWT           string
+	RefreshJWT    string
+	OrgID         string
+	UserEmail     string
+	UserID        string
+	FirstName     string
+	LastName      string
+	AvatarURL     string
+	OrgName       string
+	ConfigPath    string
+	ConfigErr     string
+	ConfigMissing bool
 }
 
 type aiConnectorRemote struct {
@@ -83,6 +92,8 @@ func runUI(c *cli.Context) error {
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", getStaticHandler()))
 	mux.HandleFunc("/", srv.handleIndex)
+	mux.HandleFunc("/api/ui/session-status", srv.handleSessionStatus)
+	mux.HandleFunc("/api/ui/auth/reauth", srv.handleReauthenticate)
 	mux.HandleFunc("/api/ui/connectors/reorder", srv.handleReorder)
 	mux.HandleFunc("/api/ui/connectors/validate-key", srv.handleValidateKey)
 	mux.HandleFunc("/api/ui/connectors/ollama/models", srv.handleOllamaModels)
@@ -119,16 +130,26 @@ func loadUIRuntimeConfig() (*uiRuntimeConfig, error) {
 	}
 
 	configPath := filepath.Join(homeDir, ".lrc.toml")
+	cfg := &uiRuntimeConfig{
+		APIURL:        defaultAPIURL,
+		ConfigPath:    configPath,
+		ConfigMissing: false,
+	}
+
 	if _, err := os.Stat(configPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("config file not found at %s. Run `lrc setup` first", configPath)
+			cfg.ConfigErr = fmt.Sprintf("config file not found at %s", configPath)
+			cfg.ConfigMissing = true
+			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to read config file %s: %w", configPath, err)
+		cfg.ConfigErr = fmt.Sprintf("failed to read config file %s: %v", configPath, err)
+		return cfg, nil
 	}
 
 	k := koanf.New(".")
 	if err := k.Load(file.Provider(configPath), toml.Parser()); err != nil {
-		return nil, fmt.Errorf("failed to load config file %s: %w", configPath, err)
+		cfg.ConfigErr = fmt.Sprintf("failed to load config file %s: %v", configPath, err)
+		return cfg, nil
 	}
 
 	apiURL := strings.TrimSpace(k.String("api_url"))
@@ -136,20 +157,234 @@ func loadUIRuntimeConfig() (*uiRuntimeConfig, error) {
 		apiURL = defaultAPIURL
 	}
 
-	jwt := strings.TrimSpace(k.String("jwt"))
-	refreshJWT := strings.TrimSpace(k.String("refresh_token"))
-	orgID := strings.TrimSpace(k.String("org_id"))
-	if jwt == "" || orgID == "" {
-		return nil, fmt.Errorf("missing jwt/org_id in %s. Run `lrc setup` to authenticate", configPath)
+	cfg.APIURL = apiURL
+	cfg.JWT = strings.TrimSpace(k.String("jwt"))
+	cfg.RefreshJWT = strings.TrimSpace(k.String("refresh_token"))
+	cfg.OrgID = strings.TrimSpace(k.String("org_id"))
+	cfg.UserEmail = strings.TrimSpace(k.String("user_email"))
+	cfg.UserID = strings.TrimSpace(k.String("user_id"))
+	cfg.FirstName = strings.TrimSpace(k.String("user_first_name"))
+	cfg.LastName = strings.TrimSpace(k.String("user_last_name"))
+	cfg.AvatarURL = strings.TrimSpace(k.String("avatar_url"))
+	cfg.OrgName = strings.TrimSpace(k.String("org_name"))
+
+	return cfg, nil
+}
+
+type uiSessionStatusResponse struct {
+	Authenticated  bool   `json:"authenticated"`
+	SessionExpired bool   `json:"session_expired"`
+	MissingConfig  bool   `json:"missing_config"`
+	DisplayName    string `json:"display_name,omitempty"`
+	FirstName      string `json:"first_name,omitempty"`
+	LastName       string `json:"last_name,omitempty"`
+	AvatarURL      string `json:"avatar_url,omitempty"`
+	UserEmail      string `json:"user_email,omitempty"`
+	UserID         string `json:"user_id,omitempty"`
+	OrgID          string `json:"org_id,omitempty"`
+	OrgName        string `json:"org_name,omitempty"`
+	APIURL         string `json:"api_url"`
+	Message        string `json:"message,omitempty"`
+}
+
+func (s *connectorManagerServer) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
 
-	return &uiRuntimeConfig{
-		APIURL:     apiURL,
-		JWT:        jwt,
-		RefreshJWT: refreshJWT,
-		OrgID:      orgID,
-		ConfigPath: configPath,
-	}, nil
+	s.mu.Lock()
+	jwt := strings.TrimSpace(s.cfg.JWT)
+	orgID := strings.TrimSpace(s.cfg.OrgID)
+	apiURL := strings.TrimSpace(s.cfg.APIURL)
+	userEmail := strings.TrimSpace(s.cfg.UserEmail)
+	userID := strings.TrimSpace(s.cfg.UserID)
+	firstName := strings.TrimSpace(s.cfg.FirstName)
+	lastName := strings.TrimSpace(s.cfg.LastName)
+	avatarURL := strings.TrimSpace(s.cfg.AvatarURL)
+	orgName := strings.TrimSpace(s.cfg.OrgName)
+	configErr := strings.TrimSpace(s.cfg.ConfigErr)
+	configMissing := s.cfg.ConfigMissing
+	s.mu.Unlock()
+
+	if apiURL == "" {
+		apiURL = defaultAPIURL
+	}
+
+	claims := decodeJWTClaims(jwt)
+	if userEmail == "" {
+		userEmail = strings.TrimSpace(claims["email"])
+	}
+	if firstName == "" {
+		firstName = firstNonEmpty(claims["given_name"], claims["first_name"])
+	}
+	if lastName == "" {
+		lastName = firstNonEmpty(claims["family_name"], claims["last_name"])
+	}
+	if avatarURL == "" {
+		avatarURL = firstNonEmpty(claims["picture"], claims["avatar_url"])
+	}
+	displayName := strings.TrimSpace(claims["name"])
+	if displayName == "" {
+		displayName = strings.TrimSpace(strings.TrimSpace(firstName + " " + lastName))
+	}
+	if displayName == "" {
+		displayName = firstNonEmpty(userEmail, userID)
+	}
+
+	status := uiSessionStatusResponse{
+		Authenticated:  false,
+		SessionExpired: false,
+		MissingConfig:  configMissing,
+		DisplayName:    displayName,
+		FirstName:      firstName,
+		LastName:       lastName,
+		AvatarURL:      avatarURL,
+		UserEmail:      userEmail,
+		UserID:         userID,
+		OrgID:          orgID,
+		OrgName:        orgName,
+		APIURL:         apiURL,
+	}
+
+	if jwt == "" || orgID == "" {
+		if configErr != "" {
+			status.Message = configErr
+		} else {
+			status.Message = "not authenticated"
+		}
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+
+	probeURL := buildLiveReviewURL(apiURL, "/api/v1/aiconnectors")
+	probeStatus, _, err := s.forwardJSONRequest(http.MethodGet, probeURL, nil, jwt, orgID)
+	if err != nil {
+		status.Message = err.Error()
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+
+	if probeStatus == http.StatusUnauthorized {
+		refreshed, refreshErr := s.refreshAccessToken(jwt)
+		if refreshErr != nil || !refreshed {
+			status.SessionExpired = true
+			if refreshErr != nil {
+				status.Message = refreshErr.Error()
+			} else {
+				status.Message = "session expired"
+			}
+			writeJSON(w, http.StatusOK, status)
+			return
+		}
+
+		s.mu.Lock()
+		jwt = strings.TrimSpace(s.cfg.JWT)
+		s.mu.Unlock()
+		probeStatus, _, err = s.forwardJSONRequest(http.MethodGet, probeURL, nil, jwt, orgID)
+		if err != nil {
+			status.Message = err.Error()
+			writeJSON(w, http.StatusOK, status)
+			return
+		}
+	}
+
+	if probeStatus >= 200 && probeStatus < 300 {
+		status.Authenticated = true
+		status.SessionExpired = false
+		status.Message = "authenticated"
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+
+	status.Message = fmt.Sprintf("session check failed with status %d", probeStatus)
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *connectorManagerServer) handleReauthenticate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	slog := newSetupLog()
+	result, err := runHexmosLoginFlow(slog)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("reauthentication failed: %v", err))
+		return
+	}
+
+	if err := writeConfig(result); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to persist session: %v", err))
+		return
+	}
+
+	_ = os.Remove(slog.logFile)
+
+	s.mu.Lock()
+	s.cfg.APIURL = cloudAPIURL
+	s.cfg.JWT = strings.TrimSpace(result.AccessToken)
+	s.cfg.RefreshJWT = strings.TrimSpace(result.RefreshToken)
+	s.cfg.OrgID = strings.TrimSpace(result.OrgID)
+	s.cfg.UserEmail = strings.TrimSpace(result.Email)
+	s.cfg.UserID = strings.TrimSpace(result.UserID)
+	s.cfg.FirstName = strings.TrimSpace(result.FirstName)
+	s.cfg.LastName = strings.TrimSpace(result.LastName)
+	s.cfg.AvatarURL = strings.TrimSpace(result.AvatarURL)
+	s.cfg.OrgName = strings.TrimSpace(result.OrgName)
+	s.cfg.ConfigErr = ""
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, uiSessionStatusResponse{
+		Authenticated:  true,
+		SessionExpired: false,
+		MissingConfig:  false,
+		DisplayName:    strings.TrimSpace(strings.TrimSpace(result.FirstName + " " + result.LastName)),
+		FirstName:      strings.TrimSpace(result.FirstName),
+		LastName:       strings.TrimSpace(result.LastName),
+		AvatarURL:      strings.TrimSpace(result.AvatarURL),
+		UserEmail:      strings.TrimSpace(result.Email),
+		UserID:         strings.TrimSpace(result.UserID),
+		OrgID:          strings.TrimSpace(result.OrgID),
+		OrgName:        strings.TrimSpace(result.OrgName),
+		APIURL:         cloudAPIURL,
+		Message:        "reauthentication complete",
+	})
+}
+
+func decodeJWTClaims(jwt string) map[string]string {
+	claims := map[string]string{}
+	parts := strings.Split(jwt, ".")
+	if len(parts) < 2 {
+		return claims
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return claims
+	}
+
+	parsed := map[string]interface{}{}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return claims
+	}
+
+	for key, value := range parsed {
+		if text, ok := value.(string); ok {
+			claims[key] = strings.TrimSpace(text)
+		}
+	}
+
+	return claims
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s *connectorManagerServer) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +544,10 @@ func (s *connectorManagerServer) proxyJSONRequest(method, apiPath string, payloa
 	orgID := s.cfg.OrgID
 	s.mu.Unlock()
 
+	if strings.TrimSpace(jwt) == "" || strings.TrimSpace(orgID) == "" {
+		return http.StatusUnauthorized, []byte(`{"error":"not authenticated. Open Home and use Re-authenticate."}`), nil
+	}
+
 	status, respBody, err := s.forwardJSONRequest(method, url, payload, jwt, orgID)
 	if err != nil {
 		return status, nil, err
@@ -443,6 +682,15 @@ func writeRawJSON(w http.ResponseWriter, status int, body []byte) {
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeRawJSON(w, status, []byte(fmt.Sprintf(`{"error":%q}`, message)))
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+	writeRawJSON(w, status, body)
 }
 
 func persistConnectorsToConfig(configPath string, connectors []aiConnectorRemote) error {

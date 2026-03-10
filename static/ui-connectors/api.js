@@ -13,7 +13,9 @@ export async function api(path, options = {}) {
   }
 
   if (!resp.ok) {
-    throw new Error(data.error || data.message || `request failed (${resp.status})`);
+    const error = new Error(data.error || data.message || `request failed (${resp.status})`);
+    error.status = resp.status;
+    throw error;
   }
 
   return data;

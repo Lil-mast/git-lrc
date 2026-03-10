@@ -24,6 +24,11 @@ export function Breadcrumbs({ route, connectorName }) {
     crumbs.push({ label: connectorName || `Edit Connector #${route.connectorID || ''}`.trim() });
   }
 
+  if (route.name === 'profile') {
+    crumbs.push({ label: 'Home', path: '/home' });
+    crumbs.push({ label: 'Profile' });
+  }
+
   return html`
     <nav class="breadcrumbs" aria-label="Breadcrumb">
       ${crumbs.map((crumb, index) => html`
