@@ -1,23 +1,33 @@
-import { getDisplayName, getInitials } from '/static/ui-connectors/session-utils.js';
+import { dedupeIdentityLines, getDisplayName, getInitials } from '/static/ui-connectors/session-utils.js';
 
-const { html } = window.preact;
+const { html, useEffect, useState } = window.preact;
 
 export function ProfilePage({ session, onReauthenticate, reauthInProgress }) {
   const displayName = getDisplayName(session);
   const initials = getInitials(session);
+  const email = (session && session.user_email) || '';
   const orgLabel = (session && session.org_name) || (session && session.org_id ? `Org #${session.org_id}` : 'Organization unavailable');
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const avatarURL = session && session.avatar_url ? session.avatar_url : '';
+  const heroLines = dedupeIdentityLines([displayName, email, orgLabel]);
+  const heroTitle = heroLines[0] || displayName;
+  const heroSubtitle = heroLines[1] || '';
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [avatarURL]);
 
   return html`
     <div class="single">
       <section class="card profile-hero">
         <div class="profile-avatar-wrap">
-          ${session && session.avatar_url
-            ? html`<img class="profile-avatar" src=${session.avatar_url} alt="${displayName}" />`
+          ${avatarURL && !avatarFailed
+            ? html`<img class="profile-avatar" src=${avatarURL} alt="${displayName}" onError=${() => setAvatarFailed(true)} />`
             : html`<div class="profile-avatar profile-avatar-fallback">${initials}</div>`}
         </div>
         <div class="profile-main">
-          <div class="profile-title">${displayName}</div>
-          <div class="profile-sub">${session && session.user_email ? session.user_email : 'No email available'}</div>
+          <div class="profile-title">${heroTitle}</div>
+          <div class="profile-sub">${heroSubtitle || 'No profile details available'}</div>
           <div class="row">
             <span class="badge">${orgLabel}</span>
             <span class="badge">${session && session.authenticated ? 'Signed in' : 'Signed out'}</span>

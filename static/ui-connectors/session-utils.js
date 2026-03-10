@@ -1,5 +1,9 @@
 export const UNKNOWN_USER_LABEL = 'Unknown User';
 
+function normalizeIdentityValue(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 export function getDisplayName(session) {
   if (!session) {
     return UNKNOWN_USER_LABEL;
@@ -36,4 +40,26 @@ export function getInitials(session) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join('') || 'U';
+}
+
+export function dedupeIdentityLines(values) {
+  const lines = [];
+  const seen = new Set();
+
+  for (const value of values || []) {
+    const text = String(value || '').trim();
+    if (!text) {
+      continue;
+    }
+
+    const normalized = normalizeIdentityValue(text);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    lines.push(text);
+  }
+
+  return lines;
 }
