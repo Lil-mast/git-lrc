@@ -12,43 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HexmosTech/git-lrc/attestation"
 	_ "modernc.org/sqlite"
 )
 
-// reviewSession represents a single review iteration stored in the DB.
-type reviewSession struct {
-	ID        int64     `json:"id"`
-	TreeHash  string    `json:"tree_hash"`
-	Branch    string    `json:"branch"`
-	Action    string    `json:"action"` // "reviewed", "skipped", "vouched"
-	Timestamp time.Time `json:"timestamp"`
-	DiffFiles string    `json:"diff_files"` // JSON-encoded []attestationFileEntry
-	ReviewID  string    `json:"review_id"`  // API review ID, if applicable
-}
-
-// attestationFileEntry is a slim representation of a file diff for storage
-// (no Content field — just line ranges).
-type attestationFileEntry struct {
-	FilePath string                `json:"file_path"`
-	Hunks    []attestationHunkRange `json:"hunks"`
-}
-
-// attestationHunkRange stores just the line-range info from a hunk.
-type attestationHunkRange struct {
-	OldStartLine int `json:"old_start_line"`
-	OldLineCount int `json:"old_line_count"`
-	NewStartLine int `json:"new_start_line"`
-	NewLineCount int `json:"new_line_count"`
-}
-
-// coverageResult holds computed coverage statistics.
-type coverageResult struct {
-	Iterations       int     `json:"iterations"`
-	PriorAICovPct    float64 `json:"prior_ai_coverage_pct"`
-	CoveredLines     int     `json:"covered_lines"`
-	TotalLines       int     `json:"total_lines"`
-	PriorReviewCount int     `json:"prior_review_count"` // count of "reviewed" sessions
-}
+type reviewSession = attestation.ReviewSession
+type attestationFileEntry = attestation.FileEntry
+type attestationHunkRange = attestation.HunkRange
+type coverageResult = attestation.CoverageResult
 
 const reviewDBSchema = `
 CREATE TABLE IF NOT EXISTS review_sessions (

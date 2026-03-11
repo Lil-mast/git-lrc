@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,7 +18,6 @@ import (
 
 const (
 	cloudAPIURL        = setuptpl.CloudAPIURL
-	hexmosSigninBase   = setuptpl.HexmosSigninBase
 	geminiKeysURL      = setuptpl.GeminiKeysURL
 	defaultGeminiModel = setuptpl.DefaultGeminiModel
 	setupTimeout       = 5 * time.Minute
@@ -248,36 +245,14 @@ func setupError(slog *setupLog, err error) error {
 
 // backupExistingConfig backs up ~/.lrc.toml if it exists and contains an api_key.
 func backupExistingConfig(slog *setupLog) error {
-	homeDir, err := os.UserHomeDir()
+	backupPath, err := setuptpl.BackupExistingConfig(slog.write)
 	if err != nil {
-		slog.write("cannot determine home directory: %v", err)
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return err
 	}
-
-	configPath := filepath.Join(homeDir, ".lrc.toml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.write("no existing config found")
-			return nil
-		}
-		slog.write("failed to read existing config: %v", err)
-		return fmt.Errorf("failed to read existing config: %w", err)
+	if backupPath != "" {
+		fmt.Printf("  %s📦 Existing config backed up to:%s %s%s%s\n", clr(cYellow), clr(cReset), clr(cDim), backupPath, clr(cReset))
+		fmt.Println()
 	}
-
-	if strings.TrimSpace(string(data)) == "" {
-		slog.write("existing config is empty; skipping backup")
-		return nil
-	}
-
-	backupPath := configPath + ".bak." + time.Now().Format("20060102-150405")
-	if err := writeFileAtomically(backupPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to backup existing config: %w", err)
-	}
-
-	slog.write("backed up existing config to %s", backupPath)
-	fmt.Printf("  %s📦 Existing config backed up to:%s %s%s%s\n", clr(cYellow), clr(cReset), clr(cDim), backupPath, clr(cReset))
-	fmt.Println()
 	return nil
 }
 
@@ -299,8 +274,7 @@ func runHexmosLoginFlow(slog *setupLog) (*setupResult, error) {
 	mux := http.NewServeMux()
 
 	// Landing page: auto-redirect to Hexmos Login
-	signinURL := fmt.Sprintf("%s?app=livereview&appRedirectURI=%s",
-		hexmosSigninBase, url.QueryEscape(callbackURL))
+	signinURL := setuptpl.BuildSigninURL(callbackURL)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -312,50 +286,21 @@ func runHexmosLoginFlow(slog *setupLog) (*setupResult, error) {
 	// Callback handler: receives ?data= from Hexmos Login
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		dataParam := r.URL.Query().Get("data")
-		if dataParam == "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := setupErrorPageTemplate.Execute(w, nil); err != nil {
-				slog.write("warning: failed to write setup error page: %v", err)
-			}
-			errCh <- fmt.Errorf("no data parameter in callback")
-			return
-		}
-
-		var cbData hexmosCallbackData
-		if err := json.Unmarshal([]byte(dataParam), &cbData); err != nil {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if writeErr := setupErrorPageTemplate.Execute(w, nil); writeErr != nil {
-				slog.write("warning: failed to write setup error page: %v", writeErr)
-			}
-			errCh <- fmt.Errorf("failed to parse callback data: %w", err)
-			return
-		}
-
-		if cbData.Result.JWT == "" || cbData.Result.Data.Email == "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := setupErrorPageTemplate.Execute(w, nil); err != nil {
-				slog.write("warning: failed to write setup error page: %v", err)
-			}
-			errCh <- fmt.Errorf("incomplete callback data (missing JWT or email)")
-			return
-		}
-
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := setupSuccessPageTemplate.Execute(w, nil); err != nil {
-			errCh <- fmt.Errorf("failed to write setup success page: %w", err)
+		cbData, err := setuptpl.ProcessLoginCallback(
+			dataParam,
+			func() error { return setupErrorPageTemplate.Execute(w, nil) },
+			func() error { return setupSuccessPageTemplate.Execute(w, nil) },
+			slog.write,
+		)
+		if err != nil {
+			errCh <- err
 			return
 		}
-		dataCh <- &cbData
+		dataCh <- cbData
 	})
 
-	server := &http.Server{Handler: mux}
-
-	// Start server in background
-	go func() {
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("server error: %w", err)
-		}
-	}()
+	server := setuptpl.StartTemporaryServer(listener, mux, errCh)
 
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	fmt.Printf("  🌐 Opening browser for Hexmos Login...\n")
@@ -369,21 +314,10 @@ func runHexmosLoginFlow(slog *setupLog) (*setupResult, error) {
 		fmt.Println()
 	}
 
-	// Wait for callback or timeout
-	var cbData *hexmosCallbackData
-	select {
-	case cbData = <-dataCh:
-		// success
-	case err := <-errCh:
-		server.Shutdown(context.Background())
+	cbData, err := setuptpl.WaitForLoginCallback(dataCh, errCh, server, setupTimeout)
+	if err != nil {
 		return nil, err
-	case <-time.After(setupTimeout):
-		server.Shutdown(context.Background())
-		return nil, fmt.Errorf("timed out waiting for login (5 minutes)")
 	}
-
-	// Shut down the temporary server
-	go server.Shutdown(context.Background())
 
 	slog.write("callback received, provisioning user")
 
