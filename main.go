@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/HexmosTech/git-lrc/interactive/input"
 	"github.com/HexmosTech/git-lrc/internal/naming"
 	"github.com/gofrs/flock"
 	"github.com/knadh/koanf/parsers/toml"
@@ -2901,50 +2902,24 @@ func sanitizeInitialMessage(msg string) string {
 // openTTY opens the controlling terminal for reading.
 // On Unix this is /dev/tty; on Windows it is CONIN$ (the console input buffer).
 func openTTY() (*os.File, error) {
-	if runtime.GOOS == "windows" {
-		return os.OpenFile("CONIN$", os.O_RDWR, 0)
-	}
-	return os.Open("/dev/tty")
+	return input.OpenTTY()
 }
 
 // handleEnterFallbackWithCancel waits for a newline in cooked mode and maps it
 // to a commit decision. This is a fallback for terminals where raw key capture
 // cannot attach reliably.
 func handleEnterFallbackWithCancel(stop <-chan struct{}) (int, error) {
-	tty, err := openTTY()
+	code, err := input.HandleEnterFallbackWithCancel(stop)
+	if errors.Is(err, input.ErrInputCancelled) {
+		return 0, errInputCancelled
+	}
 	if err != nil {
 		return 0, err
 	}
-
-	reader := bufio.NewReader(tty)
-	lineCh := make(chan struct{}, 1)
-	errCh := make(chan error, 1)
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		_, readErr := reader.ReadString('\n')
-		if readErr != nil {
-			errCh <- readErr
-			return
-		}
-		lineCh <- struct{}{}
-	}()
-
-	select {
-	case <-stop:
-		_ = tty.Close()
-		<-done
-		return 0, errInputCancelled
-	case <-lineCh:
-		_ = tty.Close()
-		<-done
+	if code == input.DecisionCommit {
 		return decisionCommit, nil
-	case readErr := <-errCh:
-		_ = tty.Close()
-		<-done
-		return 0, readErr
 	}
+	return 0, nil
 }
 
 // handleCtrlKeyWithCancel sets up raw terminal mode to detect Ctrl-S (skip), Ctrl-V (vouch), and Ctrl-C (abort).
