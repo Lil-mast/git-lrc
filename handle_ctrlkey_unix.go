@@ -144,6 +144,6 @@ func handleCtrlKeyWithCancel(stop <-chan struct{}, allowEnter bool) (int, error)
 	case err := <-errChan:
 		return waitDone(0, err)
 	case <-stop:
-		return waitDone(0, fmt.Errorf("cancelled"))
+		return waitDone(0, errInputCancelled)
 	}
 }

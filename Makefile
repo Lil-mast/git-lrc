@@ -46,9 +46,9 @@ run: build-local
 	@echo "▶️ Running lrc CLI locally..."
 	@lrc $(ARGS)
 
-# Run fake review flow using fake-review build (defaults to WAIT=30s)
+# Run fake review flow using fake-review build (defaults: WAIT=30s, TMP_REPO=/tmp/lrc-fake-review-repo)
 run-fake-review: build-local-test
-	@WAIT=$${WAIT:-30s} scripts/fake_review.sh $(ARGS)
+	@WAIT=$${WAIT:-30s} TMP_REPO=$${TMP_REPO:-/tmp/lrc-fake-review-repo} scripts/fake_review.sh $(ARGS)
 
 # Bump lrc version by editing appVersion in main.go
 # Prompts for version bump type (patch/minor/major)

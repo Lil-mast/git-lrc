@@ -3,8 +3,6 @@
 package main
 
 import (
-	"fmt"
-
 	"golang.org/x/term"
 )
 
@@ -66,6 +64,6 @@ func handleCtrlKeyWithCancel(stop <-chan struct{}, allowEnter bool) (int, error)
 	case err := <-errChan:
 		return 0, err
 	case <-stop:
-		return 0, fmt.Errorf("cancelled")
+		return 0, errInputCancelled
 	}
 }

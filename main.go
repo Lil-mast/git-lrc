@@ -1509,10 +1509,14 @@ func runReviewWithOptions(opts reviewOptions) error {
 				}()
 
 				stopKeys := make(chan struct{})
-				defer close(stopKeys)
+				keysDone := make(chan struct{})
 				go func() {
+					defer close(keysDone)
 					for {
 						code, err := handleCtrlKeyWithCancel(stopKeys, true)
+						if errors.Is(err, errInputCancelled) {
+							return
+						}
 						if err != nil || code == 0 {
 							fallbackCode, fallbackErr := handleEnterFallbackWithCancel(stopKeys)
 							if fallbackErr == nil && fallbackCode == decisionCommit {
@@ -1530,6 +1534,8 @@ func runReviewWithOptions(opts reviewOptions) error {
 
 				// Wait for decision from either HTTP endpoint or terminal
 				decision := <-progressiveDecisionChan
+				close(stopKeys)
+				<-keysDone
 				return executeDecision(decision.code, decision.message, decision.push, decisionExecutionContext{
 					precommit:          opts.precommit,
 					verbose:            verbose,
@@ -2209,6 +2215,7 @@ func trackCLIUsage(apiURL, apiKey string, verbose bool) {
 }
 
 var errPollCancelled = errors.New("poll cancelled")
+var errInputCancelled = errors.New("terminal input cancelled")
 
 func pollReview(apiURL, apiKey, reviewID string, pollInterval, timeout time.Duration, verbose bool, cancel <-chan struct{}) (*diffReviewResponse, error) {
 	endpoint := strings.TrimSuffix(apiURL, "/") + "/api/v1/diff-review/" + reviewID
@@ -2904,24 +2911,21 @@ func openTTY() (*os.File, error) {
 // to a commit decision. This is a fallback for terminals where raw key capture
 // cannot attach reliably.
 func handleEnterFallbackWithCancel(stop <-chan struct{}) (int, error) {
-	input := os.Stdin
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		tty, err := openTTY()
-		if err != nil {
-			return 0, err
-		}
-		defer tty.Close()
-		input = tty
+	tty, err := openTTY()
+	if err != nil {
+		return 0, err
 	}
 
-	reader := bufio.NewReader(input)
+	reader := bufio.NewReader(tty)
 	lineCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
+	done := make(chan struct{})
 
 	go func() {
-		_, err := reader.ReadString('\n')
-		if err != nil {
-			errCh <- err
+		defer close(done)
+		_, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			errCh <- readErr
 			return
 		}
 		lineCh <- struct{}{}
@@ -2929,11 +2933,17 @@ func handleEnterFallbackWithCancel(stop <-chan struct{}) (int, error) {
 
 	select {
 	case <-stop:
-		return 0, fmt.Errorf("cancelled")
+		_ = tty.Close()
+		<-done
+		return 0, errInputCancelled
 	case <-lineCh:
+		_ = tty.Close()
+		<-done
 		return decisionCommit, nil
-	case err := <-errCh:
-		return 0, err
+	case readErr := <-errCh:
+		_ = tty.Close()
+		<-done
+		return 0, readErr
 	}
 }
 
@@ -3166,9 +3176,14 @@ func serveHTMLInteractive(htmlPath string, port int, ln net.Listener, initialMsg
 	}()
 
 	stopKeys := make(chan struct{})
+	keysDone := make(chan struct{})
 	go func() {
+		defer close(keysDone)
 		for {
 			code, err := handleCtrlKeyWithCancel(stopKeys, true)
+			if errors.Is(err, errInputCancelled) {
+				return
+			}
 			if err != nil || code == 0 {
 				fallbackCode, fallbackErr := handleEnterFallbackWithCancel(stopKeys)
 				if fallbackErr == nil && fallbackCode == decisionCommit {
@@ -3184,7 +3199,10 @@ func serveHTMLInteractive(htmlPath string, port int, ln net.Listener, initialMsg
 		}
 	}()
 
-	defer close(stopKeys)
+	defer func() {
+		close(stopKeys)
+		<-keysDone
+	}()
 
 	syncedPrintf("📋 Review complete. Choose action:\n")
 	syncedPrintf("   [Enter]  Continue with commit\n")
