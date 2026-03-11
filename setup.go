@@ -550,89 +550,12 @@ func promptGeminiKey(result *setupResult, slog *setupLog) (string, error) {
 
 // validateGeminiKey checks the key against LiveReview's validate-key endpoint.
 func validateGeminiKey(result *setupResult, geminiKey string) (bool, string, error) {
-	reqBody := validateKeyRequest{
-		Provider: "gemini",
-		APIKey:   geminiKey,
-		Model:    defaultGeminiModel,
-	}
-
-	bodyJSON, err := json.Marshal(reqBody)
-	if err != nil {
-		return false, "", err
-	}
-
-	req, err := http.NewRequest("POST", cloudAPIURL+"/api/v1/aiconnectors/validate-key",
-		bytes.NewReader(bodyJSON))
-	if err != nil {
-		return false, "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+result.AccessToken)
-	req.Header.Set("X-Org-Context", result.OrgID)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to validate key: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, "", fmt.Errorf("failed to read validation response: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, "", fmt.Errorf("validate-key returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var valResp validateKeyResponse
-	if err := json.Unmarshal(body, &valResp); err != nil {
-		return false, "", fmt.Errorf("failed to parse validation response: %w", err)
-	}
-
-	return valResp.Valid, valResp.Message, nil
+	return setuptpl.ValidateGeminiKey(result, geminiKey)
 }
 
 // createGeminiConnector creates a Gemini AI connector in LiveReview.
 func createGeminiConnector(result *setupResult, geminiKey string) error {
-	reqBody := createConnectorRequest{
-		ProviderName:  "gemini",
-		APIKey:        geminiKey,
-		ConnectorName: "Gemini Flash",
-		SelectedModel: defaultGeminiModel,
-		DisplayOrder:  0,
-	}
-
-	bodyJSON, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", cloudAPIURL+"/api/v1/aiconnectors",
-		bytes.NewReader(bodyJSON))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+result.AccessToken)
-	req.Header.Set("X-Org-Context", result.OrgID)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to create connector: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read connector response: %w", err)
-	}
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("create connector returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	return nil
+	return setuptpl.CreateGeminiConnector(result, geminiKey)
 }
 
 // writeConfig writes the setup results to ~/.lrc.toml.
