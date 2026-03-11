@@ -1,4 +1,4 @@
-package main
+package appui
 
 import (
 	"context"
@@ -35,7 +35,7 @@ type connectorManagerServer struct {
 type authRefreshRequest = uicfg.AuthRefreshRequest
 type authRefreshResponse = uicfg.AuthRefreshResponse
 
-func runUI(c *cli.Context) error {
+func RunUI(c *cli.Context) error {
 	cfg, err := loadUIRuntimeConfig()
 	if err != nil {
 		return err

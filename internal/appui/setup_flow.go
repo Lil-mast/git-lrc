@@ -1,4 +1,4 @@
-package main
+package appui
 
 import (
 	"bufio"
@@ -12,8 +12,8 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// runSetup is the handler for "lrc setup".
-func runSetup(c *cli.Context) error {
+// RunSetup is the handler for "lrc setup".
+func RunSetup(c *cli.Context) error {
 	slog := newSetupLog()
 
 	fmt.Println()

@@ -1,4 +1,4 @@
-package main
+package appui
 
 import (
 	"fmt"
@@ -22,6 +22,24 @@ const (
 )
 
 var setupColors = true
+
+var (
+	buildVersion = "unknown"
+	buildTime    = "unknown"
+	buildCommit  = "unknown"
+)
+
+func SetBuildInfo(version, builtAt, commit string) {
+	if strings.TrimSpace(version) != "" {
+		buildVersion = version
+	}
+	if strings.TrimSpace(builtAt) != "" {
+		buildTime = builtAt
+	}
+	if strings.TrimSpace(commit) != "" {
+		buildCommit = commit
+	}
+}
 
 // colorsEnabled reports whether the terminal supports ANSI colors.
 func colorsEnabled() bool {
@@ -72,7 +90,7 @@ func newSetupLog() *setupLog {
 	}
 	sl := &setupLog{logFile: logFile}
 	sl.write("=== lrc setup started at %s ===", time.Now().Format(time.RFC3339))
-	sl.write("lrc version: %s  build: %s  commit: %s", version, buildTime, gitCommit)
+	sl.write("lrc version: %s  build: %s  commit: %s", buildVersion, buildTime, buildCommit)
 	sl.write("os: %s/%s", runtime.GOOS, runtime.GOARCH)
 	return sl
 }
@@ -98,7 +116,7 @@ func (sl *setupLog) buildIssueURL(errMsg string) string {
 	}
 
 	body := fmt.Sprintf("## `lrc setup` failed\n\n**Error:** `%s`\n\n**Version:** %s (%s, %s)\n**OS:** %s/%s\n\n<details>\n<summary>Debug log</summary>\n\n```\n%s\n```\n</details>\n",
-		errMsg, version, buildTime, gitCommit, runtime.GOOS, runtime.GOARCH, logContent)
+		errMsg, buildVersion, buildTime, buildCommit, runtime.GOOS, runtime.GOARCH, logContent)
 
 	params := url.Values{}
 	params.Set("title", "lrc setup: "+errMsg)
