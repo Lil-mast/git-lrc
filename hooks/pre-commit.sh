@@ -26,12 +26,12 @@ TREE_HASH="$(git write-tree 2>/dev/null || true)"
 ATTEST_FILE=".git/lrc/attestations/$TREE_HASH.json"
 
 if [ -z "$TREE_HASH" ]; then
-	echo "LiveReview pre-commit: failed to compute staged tree hash; run 'lrc review --staged' before committing"
+	echo "LiveReview: failed to compute staged tree hash. Run 'lrc review --staged' and retry commit." >&2
 	exit 1
 fi
 
 if [ ! -f "$ATTEST_FILE" ]; then
-	printf "You are using LiveReview. You must run 'lrc review', 'lrc review --skip', or 'lrc review --vouch' to attest your changes before you commit." 
+	echo "LiveReview: review attestation missing for staged changes. Run 'lrc review --staged' (or --skip/--vouch) and retry commit." >&2
 	exit 1
 fi
 

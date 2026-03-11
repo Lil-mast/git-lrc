@@ -1,4 +1,4 @@
-.PHONY: build build-all build-local run bump release clean test upload-secrets download-secrets
+.PHONY: build build-all build-local build-local-test run run-fake-review bump release clean test testall test-pkg upload-secrets download-secrets
 
 # Go parameters
 GOCMD=go
@@ -30,10 +30,25 @@ build-local:
 	@echo "✅ Installed lrc and git-lrc to ~/.local/bin"
 	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "⚠️  ~/.local/bin is not in PATH. Run: source ~/.lrc/env" ;; esac
 
+# Build lrc locally in fake-review mode for E2E testing (no AI calls)
+build-local-test:
+	@echo "🔨 Building lrc CLI locally in FAKE REVIEW mode..."
+	@go build -ldflags "-X main.reviewMode=fake" -o /tmp/lrc .
+	@mkdir -p $(HOME)/.local/bin
+	@install -m 0755 /tmp/lrc $(HOME)/.local/bin/lrc
+	@cp $(HOME)/.local/bin/lrc $(HOME)/.local/bin/git-lrc
+	@echo "✅ Installed fake-review lrc and git-lrc to ~/.local/bin"
+	@echo "   Use WAIT=30s make run-fake-review (or set LRC_FAKE_REVIEW_WAIT)"
+	@case ":$$PATH:" in *:$(HOME)/.local/bin:*) ;; *) echo "⚠️  ~/.local/bin is not in PATH. Run: source ~/.lrc/env" ;; esac
+
 # Run the locally built lrc CLI (pass args via ARGS="--flag value")
 run: build-local
 	@echo "▶️ Running lrc CLI locally..."
 	@lrc $(ARGS)
+
+# Run fake review flow using fake-review build (defaults to WAIT=30s)
+run-fake-review: build-local-test
+	@WAIT=$${WAIT:-30s} scripts/fake_review.sh $(ARGS)
 
 # Bump lrc version by editing appVersion in main.go
 # Prompts for version bump type (patch/minor/major)
@@ -55,6 +70,17 @@ clean:
 # Run tests
 test:
 	$(GOTEST) -count=1 ./...
+
+# Run all tests (alias for test)
+testall: test
+
+# Run tests for a specific package (example: make test-pkg PKG=./internal/naming)
+test-pkg:
+	@if [ -z "$(PKG)" ]; then \
+		echo "Usage: make test-pkg PKG=./path/to/package"; \
+		exit 1; \
+	fi
+	$(GOTEST) -count=1 $(PKG)
 
 # Upload .env variables to GitHub repo variables
 upload-secrets:

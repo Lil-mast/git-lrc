@@ -10,7 +10,7 @@ import (
 
 // Windows console input does not support non-blocking reads via syscall without
 // additional APIs, so we fall back to the original blocking implementation.
-func handleCtrlKeyWithCancel(stop <-chan struct{}) (int, error) {
+func handleCtrlKeyWithCancel(stop <-chan struct{}, allowEnter bool) (int, error) {
 	tty, err := openTTY()
 	if err != nil {
 		return 0, err
@@ -37,8 +37,10 @@ func handleCtrlKeyWithCancel(stop <-chan struct{}) (int, error) {
 			}
 			switch buf[0] {
 			case '\r', '\n': // Enter
-				codeChan <- decisionCommit
-				return
+				if allowEnter {
+					codeChan <- decisionCommit
+					return
+				}
 			case ctrlCKey: // Ctrl-C (ETX)
 				codeChan <- decisionAbort
 				return

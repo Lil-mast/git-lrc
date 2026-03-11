@@ -91,23 +91,18 @@ func TestHTMLOutputConsistency(t *testing.T) {
 	// Verify basic structure
 	html := string(content)
 
-	// Check for essential components
+	// Check for essential shell components.
+	// The current frontend loads review data dynamically from /api/review,
+	// so file names/comments are not embedded into static HTML output.
 	essentialStrings := []string{
 		"<!DOCTYPE html>",
 		"LiveReview Results",
-		"test/file.go",
-		"test/another.go",
-		"This is a test comment",
-		"Another comment",
-		"Consider using a different import",
-		"warning",
-		"error",
-		"info",
-		"style",
-		"bug",
-		"suggestion",
-		"# Test Summary",
+		"id=\"app\"",
+		"Loading LiveReview",
+		"/static/app.js",
+		"/api/review",
 		"marked.min.js",
+		"preact.umd.js",
 	}
 
 	for _, str := range essentialStrings {

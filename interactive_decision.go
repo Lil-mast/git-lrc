@@ -34,11 +34,11 @@ func executeDecision(code int, message string, push bool, ctx decisionExecutionC
 	code = normalizeDecisionCode(code)
 	switch code {
 	case decisionAbort:
-		fmt.Println("\n❌ Commit aborted by user")
+		syncedPrintln("\n❌ Commit aborted by user")
 		return cli.Exit("", decisionAbort)
 	case decisionCommit:
 		if ctx.precommit {
-			fmt.Println("\n✅ Proceeding with commit")
+			syncedPrintln("\n✅ Proceeding with commit")
 		}
 		finalMsg := strings.TrimSpace(message)
 		if finalMsg == "" {
@@ -48,7 +48,7 @@ func executeDecision(code int, message string, push bool, ctx decisionExecutionC
 			if ctx.commitMsgPath != "" {
 				if strings.TrimSpace(finalMsg) != "" {
 					if err := persistCommitMessage(ctx.commitMsgPath, finalMsg); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to store commit message: %v\n", err)
+						syncedFprintf(os.Stderr, "Warning: failed to store commit message: %v\n", err)
 					}
 				} else {
 					_ = clearCommitMessageFile(ctx.commitMsgPath)
@@ -57,7 +57,7 @@ func executeDecision(code int, message string, push bool, ctx decisionExecutionC
 
 			if push {
 				if err := persistPushRequest(ctx.commitMsgPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to store push request: %v\n", err)
+					syncedFprintf(os.Stderr, "Warning: failed to store push request: %v\n", err)
 				}
 			} else {
 				_ = clearPushRequest(ctx.commitMsgPath)
@@ -70,7 +70,7 @@ func executeDecision(code int, message string, push bool, ctx decisionExecutionC
 		}
 		return nil
 	case decisionSkip:
-		fmt.Println("\n⏭️  Review skipped, proceeding with commit")
+		syncedPrintln("\n⏭️  Review skipped, proceeding with commit")
 		if err := ensureAttestation("skipped", ctx.verbose, ctx.attestationWritten); err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func executeDecision(code int, message string, push bool, ctx decisionExecutionC
 		}
 		return nil
 	case decisionVouch:
-		fmt.Println("\n✅ Vouched, proceeding with commit")
+		syncedPrintln("\n✅ Vouched, proceeding with commit")
 		if err := recordCoverageAndAttest("vouched", ctx.diffContent, ctx.reviewID, ctx.verbose, ctx.attestationWritten); err != nil {
 			return fmt.Errorf("vouch failed: %w", err)
 		}
