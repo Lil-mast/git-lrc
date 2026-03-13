@@ -84,6 +84,7 @@ Two steps, both open in your browser:
 
 **~1 minute. One-time setup, machine-wide.** After this, _every git repo_ on your machine triggers review on commit. No per-repo config needed.
 
+
 ## How It Works
 
 ### Option A: Review on commit (automatic)
@@ -187,6 +188,33 @@ LiveReview Pre-Commit Check: skipped
 
 Your team sees _exactly_ which commits were reviewed, vouched, or skipped — right in `git log`.
 
+
+
+## Bring Your Own AI Connector (BYOK)
+
+In addition to the default Gemini setup, you can bring your own API keys for:
+
+- OpenAI
+- Claude
+- DeepSeek
+- OpenRouter
+
+Use:
+
+```bash
+lrc ui
+```
+
+From the UI, you can:
+
+- Re-authenticate your account
+- Add or update AI connectors
+- Reorder connectors to set priority
+
+By default, the **first connector in the list** is used for reviews.
+
+![LRC UI connector management preview](./gfx/git-lrc-ui.png)
+
 ## FAQ
 
 ### Review vs Vouch vs Skip?
@@ -207,7 +235,31 @@ Your team sees _exactly_ which commits were reviewed, vouched, or skipped — ri
 
 ### How is this free?
 
-`git-lrc` uses **Google's Gemini API** for AI reviews. Gemini offers a generous free tier. You bring your own API key — there's no middleman billing. The LiveReview cloud service that coordinates reviews is free for individual developers.
+`git-lrc` uses **Google's Gemini API** by default for AI reviews, and also supports BYOK connectors (OpenAI, Claude, DeepSeek, OpenRouter) — see [Bring Your Own AI Connector (BYOK)](#bring-your-own-ai-connector-byok). Gemini offers a generous free tier. You bring your own API key(s) — there's no middleman billing. The LiveReview cloud service that coordinates reviews is free for individual developers.
+
+### Which AI providers can I use with BYOK?
+
+You can connect Gemini (default), OpenAI, Claude, DeepSeek, and OpenRouter.
+
+Manage connectors from:
+
+```bash
+lrc ui
+```
+
+### How do I choose which connector is used for review?
+
+Open:
+
+```bash
+lrc ui
+```
+
+Then reorder your connector list. The first connector is used by default when a review runs.
+
+### Can I re-authenticate or change connectors later?
+
+Yes. Run `lrc ui` anytime to re-authenticate, add/remove connectors, and update connector priority.
 
 ### What data is sent?
 
@@ -229,17 +281,24 @@ git lrc review --commit HEAD~3..HEAD  # review a range
 
 ## Quick Reference
 
-| Command                    | Description                                   |
-| -------------------------- | --------------------------------------------- |
-| `lrc` or `lrc review`      | Review staged changes                         |
-| `lrc review --vouch`       | Vouch — skip AI, take personal responsibility |
-| `lrc review --skip`        | Skip review for this commit                   |
-| `lrc review --commit HEAD` | Review an already-committed change            |
-| `lrc hooks disable`        | Disable hooks for current repo                |
-| `lrc hooks enable`         | Re-enable hooks for current repo              |
-| `lrc hooks status`         | Show hook status                              |
-| `lrc self-update`          | Update to latest version                      |
-| `lrc version`              | Show version info                             |
+| Command                                 | Description                                              |
+| --------------------------------------- | -------------------------------------------------------- |
+| `lrc setup`                             | Guided onboarding and initial auth/config                |
+| `lrc ui`                                | Open local UI to re-auth, manage BYOK connectors, priority |
+| `lrc` or `lrc review`                   | Run a review with sensible defaults                      |
+| `lrc review --staged`                   | Review staged changes only                               |
+| `lrc review --commit HEAD`              | Review a specific commit                                 |
+| `lrc review --commit HEAD~3..HEAD`      | Review a commit range                                    |
+| `lrc review --range HEAD~1..HEAD`       | Review a git diff range (working/staged override)        |
+| `lrc review --vouch`                    | Vouch — skip AI, take personal responsibility            |
+| `lrc review --skip`                     | Skip review for this commit                              |
+| `lrc hooks install`                     | Install global hook dispatcher                           |
+| `lrc hooks uninstall`                   | Remove global hook dispatcher and managed scripts        |
+| `lrc hooks enable`                      | Enable hooks for current repo                            |
+| `lrc hooks disable`                     | Disable hooks for current repo                           |
+| `lrc hooks status`                      | Show hook status for current repo                        |
+| `lrc self-update`                       | Update to latest version                                 |
+| `lrc version`                           | Show version info                                        |
 
 > **Tip:** `git lrc <command>` and `lrc <command>` are interchangeable.
 
