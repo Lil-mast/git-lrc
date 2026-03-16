@@ -35,11 +35,18 @@ function convertFilesToUIFormat(files) {
         const fileId = 'file_' + filePath.replace(/[^a-zA-Z0-9]/g, '_');
         const comments = file.comments || file.Comments || [];
         const hunks = file.hunks || file.Hunks || [];
+
+        const toLineNumber = (comment) => {
+            const raw = comment.line ?? comment.Line ?? comment.line_number ?? comment.lineNumber ?? comment.LineNumber;
+            const parsed = Number(raw);
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
         
         // Build comment lookup by line
         const commentsByLine = {};
         comments.forEach(comment => {
-            const line = comment.line || comment.Line;
+            const line = toLineNumber(comment);
+            if (line <= 0) return;
             if (!commentsByLine[line]) {
                 commentsByLine[line] = [];
             }
@@ -53,6 +60,15 @@ function convertFilesToUIFormat(files) {
                 FilePath: filePath
             });
         });
+
+        const takeCommentsForLine = (lineNumber) => {
+            if (!lineNumber || lineNumber <= 0) return [];
+            const bucket = commentsByLine[lineNumber];
+            if (!bucket || bucket.length === 0) return [];
+            const pending = bucket;
+            commentsByLine[lineNumber] = [];
+            return pending;
+        };
         
         // Process hunks
         const processedHunks = hunks.map(hunk => {
@@ -68,12 +84,17 @@ function convertFilesToUIFormat(files) {
             if (hunk.Lines) {
                 // Merge comments into existing lines
                 const lines = hunk.Lines.map(line => {
-                    const newNum = parseInt(line.NewNum) || 0;
-                    if (newNum && commentsByLine[newNum]) {
+                    const newNum = parseInt(line.NewNum, 10) || 0;
+                    const oldNum = parseInt(line.OldNum, 10) || 0;
+                    let lineComments = takeCommentsForLine(newNum);
+                    if (lineComments.length === 0) {
+                        lineComments = takeCommentsForLine(oldNum);
+                    }
+                    if (lineComments.length > 0) {
                         return {
                             ...line,
                             IsComment: true,
-                            Comments: commentsByLine[newNum]
+                            Comments: lineComments
                         };
                     }
                     return line;
@@ -93,17 +114,18 @@ function convertFilesToUIFormat(files) {
                 
                 let lineData;
                 if (line.startsWith('-')) {
+                    const lineComments = takeCommentsForLine(oldLine);
                     lineData = {
                         OldNum: String(oldLine),
                         NewNum: '',
                         Content: line,
                         Class: 'diff-del',
-                        IsComment: false,
-                        Comments: []
+                        IsComment: lineComments.length > 0,
+                        Comments: lineComments
                     };
                     oldLine++;
                 } else if (line.startsWith('+')) {
-                    const lineComments = commentsByLine[newLine] || [];
+                    const lineComments = takeCommentsForLine(newLine);
                     lineData = {
                         OldNum: '',
                         NewNum: String(newLine),
@@ -114,13 +136,14 @@ function convertFilesToUIFormat(files) {
                     };
                     newLine++;
                 } else {
+                    const lineComments = takeCommentsForLine(newLine);
                     lineData = {
                         OldNum: String(oldLine),
                         NewNum: String(newLine),
                         Content: ' ' + line,
                         Class: 'diff-context',
-                        IsComment: false,
-                        Comments: []
+                        IsComment: lineComments.length > 0,
+                        Comments: lineComments
                     };
                     oldLine++;
                     newLine++;
