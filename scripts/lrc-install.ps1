@@ -494,14 +494,56 @@ $env:Path = "$INSTALL_DIR;$env:Path"
 # Ensure PATHEXT contains .CMD so git picks up the cmd shim
 if (-not ($env:PATHEXT -match "\.CMD(;|$)")) { $env:PATHEXT = "$env:PATHEXT;.CMD" }
 
+# Ensure HOME exists for subprocesses that rely on home directory resolution
+if (-not $env:HOME -and $env:USERPROFILE) {
+    $env:HOME = $env:USERPROFILE
+}
+
 # Install global hooks via lrc
 Write-Host -NoNewline "Running 'lrc hooks install' to set up global hooks... "
-try {
-    & $INSTALL_PATH hooks install 2>&1 | Out-Null
+$hookInstallMaxAttempts = 3
+$hookInstallDelayMs = 500
+$hookInstallSuccess = $false
+$hookInstallOutput = $null
+$hookInstallExitCode = $null
+
+for ($attempt = 1; $attempt -le $hookInstallMaxAttempts; $attempt++) {
+    $prevErrorActionPreference = $ErrorActionPreference
+    try {
+        # Native tools can emit benign stderr logs; use exit code for success/failure.
+        $ErrorActionPreference = "Continue"
+        $hookInstallOutput = & $INSTALL_PATH hooks install 2>&1
+        $hookInstallExitCode = $LASTEXITCODE
+    } catch {
+        $hookInstallOutput = $_.Exception.Message
+        $hookInstallExitCode = $null
+    } finally {
+        $ErrorActionPreference = $prevErrorActionPreference
+    }
+
+    if ($hookInstallExitCode -eq 0) {
+        $hookInstallSuccess = $true
+        break
+    }
+
+    if ($attempt -lt $hookInstallMaxAttempts) {
+        Start-Sleep -Milliseconds $hookInstallDelayMs
+    }
+}
+
+if ($hookInstallSuccess) {
     Write-Host "$OK" -ForegroundColor Green
-} catch {
+} else {
     Write-Host "(warning)" -ForegroundColor Yellow
-    Write-Host "Warning: Failed to run 'lrc hooks install'. You may need to run it manually." -ForegroundColor Yellow
+    Write-Host "Warning: Failed to run 'lrc hooks install' after $hookInstallMaxAttempts attempts." -ForegroundColor Yellow
+    if ($hookInstallExitCode -ne $null) {
+        Write-Host "Exit code: $hookInstallExitCode" -ForegroundColor Yellow
+    }
+    if ($hookInstallOutput) {
+        Write-Host "Last command output:" -ForegroundColor Yellow
+        @($hookInstallOutput) | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    }
+    Write-Host "You may need to run it manually: lrc hooks install" -ForegroundColor Yellow
 }
 
 # Track CLI installation if API key and URL are available
