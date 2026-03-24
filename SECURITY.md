@@ -171,5 +171,4 @@ Security fixes are prioritized on currently supported, actively maintained relea
 - Workflow definitions: [git-lrc workflows](https://github.com/HexmosTech/git-lrc/tree/main/.github/workflows)
 - Storage operations inventory: [storage/storage_status.md](storage/storage_status.md)
 - Network operations inventory: [network/network_status.md](network/network_status.md)
-- Data flow reference: [docs/LRC_README.md](docs/LRC_README.md)
 
