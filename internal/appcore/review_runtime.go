@@ -675,13 +675,53 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 
 	// For post-commit reviews, just poll and get results without interactive flow
 	if isPostCommitReview {
+		setStatusUI, stopStatusUI, statusUIDone, statusUIAbort := startTerminalStatusBubbleTea(
+			"Historical review in progress",
+			"Read-only mode. No commit actions are available.",
+			reviewMetadata,
+		)
+		setStatusUI("Status: waiting for review")
+
+		stopPoll := make(chan struct{})
+		var stopPollOnce sync.Once
+		stopPollFn := func() { stopPollOnce.Do(func() { close(stopPoll) }) }
+
 		var pollErr error
-		if fakeMode {
-			result, pollErr = pollReviewFake(reviewID, opts.PollInterval, fakeWait, verbose, nil, fakeBaseFiles, nil)
-		} else {
-			var updatedConfig Config
-			result, updatedConfig, pollErr = pollReviewWithRecovery(*config, reviewID, opts.PollInterval, opts.Timeout, verbose, nil, nil)
-			config = &updatedConfig
+		pollDone := make(chan struct{})
+		go func() {
+			if fakeMode {
+				result, pollErr = pollReviewFake(reviewID, opts.PollInterval, fakeWait, verbose, stopPoll, fakeBaseFiles, setStatusUI)
+			} else {
+				var updatedConfig Config
+				result, updatedConfig, pollErr = pollReviewWithRecovery(*config, reviewID, opts.PollInterval, opts.Timeout, verbose, stopPoll, setStatusUI)
+				config = &updatedConfig
+			}
+			close(pollDone)
+		}()
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigChan)
+
+		pollFinished := false
+		select {
+		case <-pollDone:
+			pollFinished = true
+		case <-statusUIAbort:
+			stopPollFn()
+			<-pollDone
+		case <-sigChan:
+			stopPollFn()
+			<-pollDone
+		}
+
+		stopStatusUI()
+		<-statusUIDone
+
+		if !pollFinished {
+			if errors.Is(pollErr, reviewapi.ErrPollCancelled) {
+				return nil
+			}
 		}
 		if pollErr != nil {
 			var apiErr *reviewmodel.APIError
@@ -718,6 +758,26 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 				currentReviewState.UpdateFromResult(result)
 			}
 			reviewStateMu.Unlock()
+		}
+
+		if opts.Serve && progressiveLoadingActive {
+			setStatusUI, stopStatusUI, statusUIDone, statusUIAbort = startTerminalStatusBubbleTea(
+				"Historical review ready",
+				"Viewing in browser. This mode remains read-only.",
+				reviewMetadata,
+			)
+			if pollErr != nil {
+				setStatusUI("status: review failed - check browser details")
+			} else {
+				setStatusUI("status: completed - press Ctrl-C to exit")
+			}
+			select {
+			case <-statusUIAbort:
+			case <-sigChan:
+			}
+			stopStatusUI()
+			<-statusUIDone
+			return nil
 		}
 		// No attestation for post-commit reviews
 	}
@@ -1194,18 +1254,16 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 		} else {
 			// Progressive loading is active - server is already running in background goroutine
 			// We need to block and wait for Ctrl-C so the server keeps running
-			if isPostCommitReview {
-				fmt.Printf("\n📖 Viewing historical commit review.\n")
-			} else {
+			if !isPostCommitReview {
 				fmt.Printf("\n📋 Review in progress.\n")
+				fmt.Printf("   Press Ctrl-C to exit.\n\n")
+				sigChan := make(chan os.Signal, 1)
+				signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+				defer signal.Stop(sigChan)
+				<-sigChan
+				fmt.Println("\nExiting...")
+				return nil
 			}
-			fmt.Printf("   Press Ctrl-C to exit.\n\n")
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-			defer signal.Stop(sigChan)
-			<-sigChan
-			fmt.Println("\nExiting...")
-			return nil
 		}
 	}
 

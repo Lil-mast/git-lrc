@@ -68,7 +68,21 @@ type decisionTUIModel struct {
 	onEditor func() (string, int64, error)
 }
 
+type statusTUIModel struct {
+	title       string
+	description string
+	metadata    []string
+	status      string
+	width       int
+	compact     bool
+	abort       chan<- struct{}
+}
+
 func (m decisionTUIModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m statusTUIModel) Init() tea.Cmd {
 	return nil
 }
 
@@ -79,9 +93,7 @@ func (m decisionTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch v := msg.(type) {
 	case tuiStatusMsg:
-		clean := strings.TrimSpace(v.Text)
-		clean = strings.TrimPrefix(clean, "Status:")
-		m.status = strings.TrimSpace(clean)
+		m.status = normalizeStatusText(v.Text)
 		return m, nil
 	case tuiDraftMsg:
 		if v.Version <= 0 || v.Version < m.draftVer {
@@ -289,6 +301,72 @@ func (m decisionTUIModel) View() tea.View {
 	return tea.NewView(strings.Join(lines, "\n"))
 }
 
+func (m statusTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch v := msg.(type) {
+	case tuiStatusMsg:
+		m.status = normalizeStatusText(v.Text)
+		return m, nil
+	case tea.WindowSizeMsg:
+		m.width = v.Width
+		m.compact = v.Width > 0 && v.Width < 100
+		return m, nil
+	case tea.KeyPressMsg:
+		key := strings.ToLower(v.String())
+		if key == "ctrl+c" || key == "q" || key == "esc" {
+			if m.abort != nil {
+				select {
+				case m.abort <- struct{}{}:
+				default:
+				}
+			}
+			return m, tea.Quit
+		}
+	}
+
+	return m, nil
+}
+
+func (m statusTUIModel) View() tea.View {
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, styleHeader("+-------------------------------------------+"))
+	lines = append(lines, styleHeader("|             LiveReview Status             |"))
+	lines = append(lines, styleHeader("+-------------------------------------------+"))
+	if strings.TrimSpace(m.title) != "" {
+		lines = append(lines, styleTitle(m.title))
+	}
+	if strings.TrimSpace(m.description) != "" {
+		lines = append(lines, styleMuted(m.description))
+	}
+	if len(m.metadata) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, styleSection("+ Metadata +"))
+		for _, item := range m.metadata {
+			trimmed := strings.TrimSpace(item)
+			if trimmed == "" {
+				continue
+			}
+			lines = append(lines, styleMuted(trimmed))
+		}
+	}
+
+	lines = append(lines, "")
+	statusLine := strings.TrimSpace(m.status)
+	if statusLine == "" {
+		statusLine = "waiting for review"
+	}
+	lines = append(lines, styleStatus("Status: "+statusLine))
+	lines = append(lines, "")
+	if m.compact {
+		lines = append(lines, styleMuted("Keys: Ctrl-C or Q to exit"))
+	} else {
+		lines = append(lines, styleMuted("Keys: Ctrl-C or Q to exit | This historical review mode is read-only"))
+	}
+	lines = append(lines, "")
+
+	return tea.NewView(strings.Join(lines, "\n"))
+}
+
 func (m *decisionTUIModel) submit(d terminalDecision) {
 	if m.decided {
 		return
@@ -383,6 +461,61 @@ func startTerminalDecisionBubbleTea(prompt decisionPrompt, onDraftChange func(st
 	}
 
 	return decisionCh, setStatus, setDraft, stop, doneCh
+}
+
+func startTerminalStatusBubbleTea(title, description string, metadata []string) (func(string), func(), <-chan struct{}, <-chan struct{}) {
+	statusCh := make(chan string, 32)
+	doneCh := make(chan struct{})
+	abortCh := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		defer close(doneCh)
+
+		model := statusTUIModel{
+			title:       title,
+			description: description,
+			metadata:    metadata,
+			width:       80,
+			compact:     true,
+			abort:       abortCh,
+		}
+		program := tea.NewProgram(model, tea.WithContext(ctx))
+
+		forwardDone := make(chan struct{})
+		go func() {
+			defer close(forwardDone)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case s := <-statusCh:
+					program.Send(tuiStatusMsg{Text: s})
+				}
+			}
+		}()
+
+		_, _ = program.Run()
+		cancel()
+		<-forwardDone
+	}()
+
+	setStatus := func(text string) {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			return
+		}
+		select {
+		case statusCh <- trimmed:
+		default:
+		}
+	}
+
+	stop := func() {
+		cancel()
+	}
+
+	return setStatus, stop, doneCh, abortCh
 }
 
 func newDecisionTUIModel(prompt decisionPrompt, output chan<- terminalDecision, onDraftChange func(string) int64, openEditor func() (string, int64, error)) decisionTUIModel {
@@ -602,4 +735,12 @@ func styleAction(s string, selected bool) string {
 		return fmt.Sprintf("\x1b[1;38;5;16;48;5;45m %s \x1b[0m", s)
 	}
 	return "\x1b[38;5;252m" + s + "\x1b[0m"
+}
+
+func normalizeStatusText(text string) string {
+	clean := strings.TrimSpace(text)
+	if len(clean) >= len("status:") && strings.EqualFold(clean[:len("status:")], "status:") {
+		clean = clean[len("status:"):]
+	}
+	return strings.TrimSpace(clean)
 }
