@@ -162,13 +162,18 @@ func (m decisionTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.publishDraftChange()
 				}
 				return m, nil
-			case "enter":
+			case "ctrl+enter", "ctrl+j":
 				action, ok := m.currentAction()
 				if ok {
 					if done := m.trySubmit(action); done {
 						return m, tea.Quit
 					}
 				}
+				return m, nil
+			case "enter":
+				m.insertRune('\n')
+				m.errorMsg = ""
+				m.publishDraftChange()
 				return m, nil
 			}
 
@@ -263,7 +268,8 @@ func (m decisionTUIModel) View() tea.View {
 	lines = append(lines, "")
 	lines = append(lines, m.renderTextbox()...)
 	lines = append(lines, "")
-	lines = append(lines, styleMuted("Keys: Tab switch focus, Up/Down select action, Enter confirm"))
+	lines = append(lines, styleMuted("Keys: Tab switch focus, Up/Down select action"))
+	lines = append(lines, styleMuted("Actions: Enter confirm | Message: Enter newline, Ctrl-Enter confirm"))
 	if !m.compact {
 		lines = append(lines, styleMuted("Shortcuts (actions focus): C commit, P commit+push, S skip, V vouch, Q abort, Ctrl-C abort"))
 		if m.onEditor != nil {
@@ -324,22 +330,31 @@ func startTerminalDecisionBubbleTea(prompt decisionPrompt, onDraftChange func(st
 		forwardDone := make(chan struct{})
 		go func() {
 			defer close(forwardDone)
-			for s := range statusCh {
-				program.Send(tuiStatusMsg{Text: s})
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case s := <-statusCh:
+					program.Send(tuiStatusMsg{Text: s})
+				}
 			}
 		}()
 
 		draftForwardDone := make(chan struct{})
 		go func() {
 			defer close(draftForwardDone)
-			for d := range draftCh {
-				program.Send(d)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case d := <-draftCh:
+					program.Send(d)
+				}
 			}
 		}()
 
 		_, _ = program.Run()
-		close(statusCh)
-		close(draftCh)
+		cancel()
 		<-forwardDone
 		<-draftForwardDone
 	}()
@@ -515,14 +530,50 @@ func (m decisionTUIModel) renderTextbox() []string {
 	if m.focus == 1 {
 		focusMark = styleFocus("▶ ")
 	}
-	text := string(m.message)
+	lines := []string{styleSection("+ Message +")}
+	rendered := m.renderMessageLines()
+	for i, line := range rendered {
+		prefix := styleMuted("  ")
+		if i == 0 {
+			prefix = focusMark
+		}
+		if line == "" {
+			line = " "
+		}
+		lines = append(lines, prefix+line)
+	}
+	return lines
+}
+
+func (m decisionTUIModel) renderMessageLines() []string {
+	if m.focus != 1 && len(m.message) == 0 {
+		return []string{styleMuted("<empty>")}
+	}
+
+	cursor := m.cursor
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(m.message) {
+		cursor = len(m.message)
+	}
+
+	withCursor := make([]rune, 0, len(m.message)+1)
+	for i := 0; i <= len(m.message); i++ {
+		if m.focus == 1 && i == cursor {
+			withCursor = append(withCursor, '|')
+		}
+		if i < len(m.message) {
+			withCursor = append(withCursor, m.message[i])
+		}
+	}
+
+	text := string(withCursor)
 	if text == "" {
-		text = styleMuted("<empty>")
+		text = "|"
 	}
-	return []string{
-		styleSection("+ Message +"),
-		focusMark + text,
-	}
+
+	return strings.Split(text, "\n")
 }
 
 func styleHeader(s string) string { return "\x1b[1;38;5;51m" + s + "\x1b[0m" }
