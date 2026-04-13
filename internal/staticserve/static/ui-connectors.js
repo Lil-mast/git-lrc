@@ -30,6 +30,7 @@ function App() {
   const [ollamaModels, setOllamaModels] = useState([]);
   const [session, setSession] = useState(null);
   const [reauthInProgress, setReauthInProgress] = useState(false);
+  const [orgSwitching, setOrgSwitching] = useState(false);
 
   const selectedProvider = useMemo(() => {
     return providers.find((provider) => provider.id === form.provider_name) || providers[0];
@@ -120,10 +121,19 @@ function App() {
     setError('');
     setStatus('Starting browser login...');
     try {
-      const result = await api('/api/ui/auth/reauth', { method: 'POST' });
-      setSession(result);
-      setStatus('Re-authentication complete');
-      await loadConnectors(true);
+      await api('/api/ui/auth/reauth', { method: 'POST' });
+      const refreshedSession = await loadSessionStatus(true);
+      if (refreshedSession) {
+        setSession(refreshedSession);
+      }
+      if (refreshedSession && refreshedSession.authenticated && refreshedSession.org_id) {
+        setStatus('Re-authentication complete');
+        await loadConnectors(true, refreshedSession);
+      } else {
+        setConnectors([]);
+        setDraftOrder([]);
+        setStatus('Re-authentication complete. Select organization context in the header.');
+      }
       navigate('/connectors');
     } catch (err) {
       setError(err.message || String(err));
@@ -133,14 +143,15 @@ function App() {
     }
   }
 
-  async function loadConnectors(force = false) {
+  async function loadConnectors(force = false, sessionSnapshot = null) {
     setLoading(true);
     setError('');
     try {
-      if (!force && session && !session.authenticated) {
+      const activeSession = sessionSnapshot || session;
+      if (!activeSession || !activeSession.authenticated || !activeSession.org_id) {
         setConnectors([]);
         setDraftOrder([]);
-        setStatus('Authenticate to load connectors');
+        setStatus(activeSession && activeSession.authenticated ? 'Select organization context to load connectors' : 'Authenticate to load connectors');
         return;
       }
       const data = await api('/api/ui/connectors');
@@ -158,11 +169,51 @@ function App() {
     }
   }
 
+  async function switchOrganization(nextOrgID) {
+    const targetOrgID = String(nextOrgID || '').trim();
+    const currentOrgID = String((session && session.org_id) || '').trim();
+    if (!targetOrgID || targetOrgID === currentOrgID) {
+      return;
+    }
+
+    setOrgSwitching(true);
+    setError('');
+    setStatus('Switching organization context...');
+    try {
+      await api('/api/ui/org-context', {
+        method: 'PUT',
+        body: JSON.stringify({ org_id: targetOrgID }),
+      });
+
+      const refreshedSession = await loadSessionStatus(true);
+      if (refreshedSession) {
+        setSession(refreshedSession);
+      }
+
+      if (refreshedSession && refreshedSession.authenticated && refreshedSession.org_id) {
+        await loadConnectors(true, refreshedSession);
+        setStatus('Organization context switched');
+      } else {
+        setConnectors([]);
+        setDraftOrder([]);
+        setStatus('Organization switch complete. Select organization context in the header.');
+      }
+    } catch (err) {
+      if (await handleAuthError(err)) {
+        return;
+      }
+      setError(err.message || String(err));
+      setStatus('Failed to switch organization context');
+    } finally {
+      setOrgSwitching(false);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const currentSession = await loadSessionStatus(true);
-      if (currentSession && currentSession.authenticated) {
-        await loadConnectors();
+      if (currentSession && currentSession.authenticated && currentSession.org_id) {
+        await loadConnectors(false, currentSession);
       }
     })();
   }, []);
@@ -620,7 +671,9 @@ function App() {
         activePath=${activePath}
         session=${session}
         reauthInProgress=${reauthInProgress}
+        orgSwitching=${orgSwitching}
         onReauthenticate=${runReauthenticate}
+        onSwitchOrg=${switchOrganization}
       />
       <${Breadcrumbs} route=${route} connectorName=${breadcrumbConnectorLabel} />
       ${error ? html`<div class="err-banner">${error}</div>` : ''}

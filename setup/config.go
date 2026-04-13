@@ -1,19 +1,71 @@
 package setup
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"strings"
 	"time"
 
+	cfgutil "github.com/HexmosTech/git-lrc/config"
 	"github.com/HexmosTech/git-lrc/configpath"
 	"github.com/HexmosTech/git-lrc/storage"
 )
 
+type ExistingConfigDetails struct {
+	Path   string
+	Exists bool
+	APIURL string
+}
+
+type WriteConfigOptions struct {
+	APIURL string
+}
+
+// ReadExistingConfigDetails inspects ~/.lrc.toml and returns current api_url when present.
+func ReadExistingConfigDetails() (ExistingConfigDetails, error) {
+	configPath, err := configpath.ResolveConfigPath()
+	if err != nil {
+		return ExistingConfigDetails{}, err
+	}
+
+	details := ExistingConfigDetails{Path: configPath}
+	data, err := storage.ReadConfigFile(configPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return details, nil
+		}
+		return ExistingConfigDetails{}, err
+	}
+
+	if strings.TrimSpace(string(data)) == "" {
+		return details, nil
+	}
+
+	details.Exists = true
+	if apiURL, ok := cfgutil.ReadQuotedConfigValue(string(data), "api_url"); ok {
+		details.APIURL = strings.TrimSpace(apiURL)
+	}
+
+	return details, nil
+}
+
 // WriteConfig writes setup results to ~/.lrc.toml.
 func WriteConfig(result *SetupResult) error {
+	return WriteConfigWithOptions(result, WriteConfigOptions{APIURL: CloudAPIURL})
+}
+
+// WriteConfigWithOptions writes setup results to ~/.lrc.toml with explicit write controls.
+func WriteConfigWithOptions(result *SetupResult, opts WriteConfigOptions) error {
 	configPath, err := configpath.ResolveConfigPath()
 	if err != nil {
 		return err
+	}
+
+	apiURL := strings.TrimSpace(opts.APIURL)
+	if apiURL == "" {
+		apiURL = CloudAPIURL
 	}
 
 	content := fmt.Sprintf(`# LiveReview CLI configuration
@@ -34,7 +86,7 @@ refresh_token = %q
 `,
 		time.Now().Format(time.RFC3339),
 		result.PlainAPIKey,
-		CloudAPIURL,
+		apiURL,
 		result.Email,
 		result.FirstName,
 		result.LastName,

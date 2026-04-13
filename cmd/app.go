@@ -21,6 +21,7 @@ type Handlers struct {
 	RunAttestationTrailer cli.ActionFunc
 	RunSetup              cli.ActionFunc
 	RunUI                 cli.ActionFunc
+	RunUsageInspect       cli.ActionFunc
 }
 
 // BuildApp constructs the full CLI app with all command wiring.
@@ -178,6 +179,22 @@ func BuildApp(version, buildTime, gitCommit string, baseFlags, debugFlags []cli.
 				Action: h.RunSelfUpdate,
 			},
 			{
+				Name:  "usage",
+				Usage: "Inspect plan and quota usage",
+				Subcommands: []*cli.Command{
+					{
+						Name:  "inspect",
+						Usage: "Fetch and display current quota envelope for selected org",
+						Flags: []cli.Flag{
+							&cli.StringFlag{Name: "api-url", Usage: "override LiveReview API base URL"},
+							&cli.StringFlag{Name: "output", Value: "pretty", Usage: "output format: pretty or json"},
+							&cli.BoolFlag{Name: "verbose", Usage: "enable verbose output"},
+						},
+						Action: h.RunUsageInspect,
+					},
+				},
+			},
+			{
 				Name:   "review-cleanup",
 				Usage:  "Clean up review session history for the current branch (called by post-commit hook)",
 				Hidden: true,
@@ -196,8 +213,27 @@ func BuildApp(version, buildTime, gitCommit string, baseFlags, debugFlags []cli.
 				Action: h.RunAttestationTrailer,
 			},
 			{
-				Name:   "setup",
-				Usage:  "Guided onboarding — authenticate with Hexmos and configure LiveReview + AI",
+				Name:  "setup",
+				Usage: "Guided onboarding — authenticate with Hexmos and configure LiveReview + AI",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "api-url",
+						Aliases: []string{"base-url"},
+						Usage:   "override LiveReview API base URL for setup",
+					},
+					&cli.BoolFlag{
+						Name:  "yes",
+						Usage: "run non-interactively; requires explicit --keep-api-url or --replace-api-url when config already exists",
+					},
+					&cli.BoolFlag{
+						Name:  "keep-api-url",
+						Usage: "when config exists, preserve existing api_url",
+					},
+					&cli.BoolFlag{
+						Name:  "replace-api-url",
+						Usage: "when config exists, replace api_url with setup target URL",
+					},
+				},
 				Action: h.RunSetup,
 			},
 			{

@@ -24,6 +24,12 @@ func RunSetup(c *cli.Context) error {
 	fmt.Printf("  %s───────────────────%s\n", clr(cDim), clr(cReset))
 	fmt.Println()
 
+	targetAPIURL := resolveSetupTargetAPIURL(c.String("api-url"))
+	selectedAPIURL, err := resolveSetupAPIURL(c, slog, targetAPIURL)
+	if err != nil {
+		return setupError(slog, err)
+	}
+
 	if err := backupExistingConfig(slog); err != nil {
 		return setupError(slog, err)
 	}
@@ -32,7 +38,7 @@ func RunSetup(c *cli.Context) error {
 	fmt.Println()
 	slog.write("phase 1: starting hexmos login flow")
 
-	result, err := runHexmosLoginFlow(slog)
+	result, err := runHexmosLoginFlow(slog, selectedAPIURL)
 	if err != nil {
 		return setupError(slog, fmt.Errorf("authentication failed: %w", err))
 	}
@@ -57,20 +63,20 @@ func RunSetup(c *cli.Context) error {
 		fmt.Println()
 	}
 
-	geminiKey, err := promptGeminiKey(result, slog)
+	geminiKey, err := promptGeminiKey(result, selectedAPIURL, slog)
 	if err != nil {
 		return setupError(slog, fmt.Errorf("gemini setup failed: %w", err))
 	}
 
 	slog.write("creating gemini connector")
-	if err := createGeminiConnector(result, geminiKey); err != nil {
+	if err := createGeminiConnector(result, geminiKey, selectedAPIURL); err != nil {
 		return setupError(slog, fmt.Errorf("failed to create AI connector: %w", err))
 	}
 	fmt.Printf("  %s✅ Gemini connector created%s %s(model: %s)%s\n", clr(cGreen), clr(cReset), clr(cDim), defaultGeminiModel, clr(cReset))
 	fmt.Println()
 	slog.write("gemini connector created")
 
-	if err := writeConfig(result); err != nil {
+	if err := writeConfig(result, selectedAPIURL); err != nil {
 		return setupError(slog, fmt.Errorf("failed to write config: %w", err))
 	}
 	slog.write("config written to ~/.lrc.toml")
@@ -81,6 +87,122 @@ func RunSetup(c *cli.Context) error {
 		slog.write("warning: could not remove log file: %v", err)
 	}
 	return nil
+}
+
+func resolveSetupTargetAPIURL(raw string) string {
+	target := strings.TrimSpace(raw)
+	target = strings.TrimRight(target, "/")
+	if target == "" {
+		return cloudAPIURL
+	}
+	return target
+}
+
+func resolveSetupAPIURL(c *cli.Context, slog *setupLog, targetAPIURL string) (string, error) {
+	keepAPIURL := c.Bool("keep-api-url")
+	replaceAPIURL := c.Bool("replace-api-url")
+	if keepAPIURL && replaceAPIURL {
+		return "", fmt.Errorf("cannot combine --keep-api-url and --replace-api-url")
+	}
+
+	details, err := setuptpl.ReadExistingConfigDetails()
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect existing config: %w", err)
+	}
+
+	if !details.Exists {
+		slog.write("setup preflight: no existing config, using setup target api_url=%s", targetAPIURL)
+		return targetAPIURL, nil
+	}
+
+	fmt.Printf("  %s⚠ Existing config detected:%s %s%s%s\n", clr(cYellow), clr(cReset), clr(cDim), details.Path, clr(cReset))
+	if strings.TrimSpace(details.APIURL) != "" {
+		fmt.Printf("  %sCurrent api_url:%s %s%s%s\n", clr(cDim), clr(cReset), clr(cCyan), details.APIURL, clr(cReset))
+	} else {
+		fmt.Printf("  %sCurrent config has no explicit api_url.%s\n", clr(cDim), clr(cReset))
+	}
+	fmt.Printf("  %sSetup target api_url:%s %s%s%s\n", clr(cDim), clr(cReset), clr(cCyan), targetAPIURL, clr(cReset))
+
+	if keepAPIURL {
+		selected := retainedAPIURL(details.APIURL, targetAPIURL)
+		slog.write("setup preflight: selected keep-api-url, api_url=%s", selected)
+		fmt.Printf("  %sUsing existing api_url.%s\n\n", clr(cGreen), clr(cReset))
+		return selected, nil
+	}
+
+	if replaceAPIURL {
+		slog.write("setup preflight: selected replace-api-url, api_url=%s", targetAPIURL)
+		fmt.Printf("  %sReplacing api_url with setup target.%s\n\n", clr(cYellow), clr(cReset))
+		return targetAPIURL, nil
+	}
+
+	nonInteractive := c.Bool("yes") || !isInteractiveSetupStdin()
+	if nonInteractive {
+		return "", fmt.Errorf("config exists at %s; pass --keep-api-url or --replace-api-url before running non-interactively", details.Path)
+	}
+
+	keep, promptErr := promptSetupYesNo("  Keep existing api_url?", true)
+	if promptErr != nil {
+		return "", fmt.Errorf("failed to read setup preflight choice: %w", promptErr)
+	}
+
+	if keep {
+		selected := retainedAPIURL(details.APIURL, targetAPIURL)
+		slog.write("setup preflight: interactive keep selected, api_url=%s", selected)
+		fmt.Printf("  %sUsing existing api_url.%s\n\n", clr(cGreen), clr(cReset))
+		return selected, nil
+	}
+
+	slog.write("setup preflight: interactive replace selected, api_url=%s", targetAPIURL)
+	fmt.Printf("  %sReplacing api_url with setup target.%s\n\n", clr(cYellow), clr(cReset))
+	return targetAPIURL, nil
+}
+
+func retainedAPIURL(existing string, fallback string) string {
+	trimmed := strings.TrimSpace(existing)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
+}
+
+func promptSetupYesNo(question string, defaultYes bool) (bool, error) {
+	if !isInteractiveSetupStdin() {
+		return defaultYes, nil
+	}
+
+	suffix := "[y/N]"
+	if defaultYes {
+		suffix = "[Y/n]"
+	}
+
+	fmt.Printf("%s %s: ", question, suffix)
+	reader := bufio.NewReader(os.Stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("failed to read setup confirmation input: %w", err)
+	}
+
+	trimmed := strings.ToLower(strings.TrimSpace(answer))
+	if trimmed == "" {
+		return defaultYes, nil
+	}
+	if trimmed == "y" || trimmed == "yes" {
+		return true, nil
+	}
+	if trimmed == "n" || trimmed == "no" {
+		return false, nil
+	}
+
+	return defaultYes, nil
+}
+
+func isInteractiveSetupStdin() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 // backupExistingConfig backs up ~/.lrc.toml if it exists and contains an api_key.
@@ -98,7 +220,7 @@ func backupExistingConfig(slog *setupLog) error {
 
 // runHexmosLoginFlow starts a temporary server, opens the browser for Hexmos Login,
 // waits for the callback, and provisions the user in LiveReview.
-func runHexmosLoginFlow(slog *setupLog) (*setupResult, error) {
+func runHexmosLoginFlow(slog *setupLog, apiURL string) (*setupResult, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("failed to start listener: %w", err)
@@ -160,16 +282,16 @@ func runHexmosLoginFlow(slog *setupLog) (*setupResult, error) {
 
 	slog.write("callback received, provisioning user")
 
-	return provisionLiveReviewUser(cbData, slog)
+	return provisionLiveReviewUser(cbData, apiURL, slog)
 }
 
 // provisionLiveReviewUser calls ensure-cloud-user and creates an API key.
-func provisionLiveReviewUser(cbData *hexmosCallbackData, slog *setupLog) (*setupResult, error) {
-	return setuptpl.ProvisionLiveReviewUser(cbData, slog.write)
+func provisionLiveReviewUser(cbData *hexmosCallbackData, apiURL string, slog *setupLog) (*setupResult, error) {
+	return setuptpl.ProvisionLiveReviewUser(cbData, apiURL, slog.write)
 }
 
 // promptGeminiKey reads the Gemini API key from stdin with up to 3 attempts.
-func promptGeminiKey(result *setupResult, slog *setupLog) (string, error) {
+func promptGeminiKey(result *setupResult, apiURL string, slog *setupLog) (string, error) {
 	reader := bufio.NewReader(os.Stdin)
 
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -187,7 +309,7 @@ func promptGeminiKey(result *setupResult, slog *setupLog) (string, error) {
 
 		slog.write("validating gemini key (attempt %d)", attempt)
 
-		valid, msg, err := validateGeminiKey(result, key)
+		valid, msg, err := validateGeminiKey(result, key, apiURL)
 		if err != nil {
 			slog.write("gemini key validation error: %v", err)
 			fmt.Printf("  %s❌ Validation error: %v%s\n", clr(cRed), err, clr(cReset))
@@ -214,16 +336,16 @@ func promptGeminiKey(result *setupResult, slog *setupLog) (string, error) {
 	return "", fmt.Errorf("failed to provide a valid Gemini API key after 3 attempts")
 }
 
-func validateGeminiKey(result *setupResult, geminiKey string) (bool, string, error) {
-	return setuptpl.ValidateGeminiKey(result, geminiKey)
+func validateGeminiKey(result *setupResult, geminiKey string, apiURL string) (bool, string, error) {
+	return setuptpl.ValidateGeminiKey(result, geminiKey, apiURL)
 }
 
-func createGeminiConnector(result *setupResult, geminiKey string) error {
-	return setuptpl.CreateGeminiConnector(result, geminiKey)
+func createGeminiConnector(result *setupResult, geminiKey string, apiURL string) error {
+	return setuptpl.CreateGeminiConnector(result, geminiKey, apiURL)
 }
 
-func writeConfig(result *setupResult) error {
-	return setuptpl.WriteConfig(result)
+func writeConfig(result *setupResult, apiURL string) error {
+	return setuptpl.WriteConfigWithOptions(result, setuptpl.WriteConfigOptions{APIURL: strings.TrimSpace(apiURL)})
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {

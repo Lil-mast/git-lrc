@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/HexmosTech/git-lrc/network"
@@ -11,11 +12,16 @@ import (
 
 // ProvisionLiveReviewUser calls ensure-cloud-user and creates an API key.
 // Optional logf receives debug log messages.
-func ProvisionLiveReviewUser(cbData *HexmosCallbackData, logf func(format string, args ...interface{})) (*SetupResult, error) {
+func ProvisionLiveReviewUser(cbData *HexmosCallbackData, apiURL string, logf func(format string, args ...interface{})) (*SetupResult, error) {
 	log := func(format string, args ...interface{}) {
 		if logf != nil {
 			logf(format, args...)
 		}
+	}
+
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = CloudAPIURL
 	}
 
 	reqBody := EnsureCloudUserRequest{
@@ -26,7 +32,7 @@ func ProvisionLiveReviewUser(cbData *HexmosCallbackData, logf func(format string
 	}
 
 	client := network.NewSetupClient(30 * time.Second)
-	resp, err := network.SetupEnsureCloudUser(client, CloudAPIURL, reqBody, cbData.Result.JWT)
+	resp, err := network.SetupEnsureCloudUser(client, apiURL, reqBody, cbData.Result.JWT)
 	if err != nil {
 		return nil, fmt.Errorf("failed to contact LiveReview API: %w", err)
 	}
@@ -62,9 +68,9 @@ func ProvisionLiveReviewUser(cbData *HexmosCallbackData, logf func(format string
 	}
 
 	apiKeyReq := CreateAPIKeyRequest{Label: "LRC CLI Key"}
-	apiKeyURL := network.SetupCreateAPIKeyURL(CloudAPIURL, result.OrgID)
+	apiKeyURL := network.SetupCreateAPIKeyURL(apiURL, result.OrgID)
 	log("creating API key: POST %s", apiKeyURL)
-	resp2, err := network.SetupCreateAPIKey(client, CloudAPIURL, result.OrgID, apiKeyReq, result.AccessToken)
+	resp2, err := network.SetupCreateAPIKey(client, apiURL, result.OrgID, apiKeyReq, result.AccessToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create API key: %w", err)
 	}

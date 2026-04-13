@@ -32,6 +32,31 @@ func UpsertQuotedConfigValue(content, key, value string) string {
 	return strings.Join(lines, "\n")
 }
 
+func ReadQuotedConfigValue(content, key string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	prefix := key + " ="
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+
+		rawValue := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if rawValue == "" {
+			return "", true
+		}
+
+		if unquoted, err := strconv.Unquote(rawValue); err == nil {
+			return unquoted, true
+		}
+
+		return rawValue, true
+	}
+
+	return "", false
+}
+
 func StripManagedAIConnectorsSection(content, sectionBegin, sectionEnd string) string {
 	start := strings.Index(content, sectionBegin)
 	if start == -1 {

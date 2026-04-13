@@ -73,6 +73,10 @@ func upsertQuotedConfigValue(content string, key string, value string) string {
 	return cfg.UpsertQuotedConfigValue(content, key, value)
 }
 
+func readQuotedConfigValue(content string, key string) (string, bool) {
+	return cfg.ReadQuotedConfigValue(content, key)
+}
+
 func stripManagedAIConnectorsSection(content string) string {
 	return cfg.StripManagedAIConnectorsSection(content, aiConnectorsSectionBegin, aiConnectorsSectionEnd)
 }

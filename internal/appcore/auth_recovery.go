@@ -166,7 +166,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	if err == nil {
 		updated := config
 		updated.APIKey = newKey
-		if persistErr := persistConfigUpdates(updated.ConfigPath, updated.APIURL, map[string]string{"api_key": newKey}); persistErr != nil {
+		if persistErr := persistConfigUpdates(updated.ConfigPath, map[string]string{"api_key": newKey}); persistErr != nil {
 			diag.FailureReason = fmt.Sprintf("persist api_key failed: %v", persistErr)
 			reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
 			return config, fmt.Errorf("generated a new API key but failed to persist config: %w", persistErr)
@@ -203,7 +203,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	if strings.TrimSpace(newRefresh) != "" {
 		updated.RefreshToken = newRefresh
 	}
-	if persistErr := persistConfigUpdates(updated.ConfigPath, updated.APIURL, map[string]string{"jwt": updated.JWT, "refresh_token": updated.RefreshToken}); persistErr != nil {
+	if persistErr := persistConfigUpdates(updated.ConfigPath, map[string]string{"jwt": updated.JWT, "refresh_token": updated.RefreshToken}); persistErr != nil {
 		diag.FailureReason = fmt.Sprintf("persist refreshed tokens failed: %v", persistErr)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
 		return config, fmt.Errorf("refreshed session tokens but failed to persist them: %w", persistErr)
@@ -224,7 +224,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	}
 
 	updated.APIKey = newKey
-	if persistErr := persistConfigUpdates(updated.ConfigPath, updated.APIURL, map[string]string{"api_key": updated.APIKey}); persistErr != nil {
+	if persistErr := persistConfigUpdates(updated.ConfigPath, map[string]string{"api_key": updated.APIKey}); persistErr != nil {
 		diag.FailureReason = fmt.Sprintf("persist recovered api_key failed: %v", persistErr)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
 		return config, fmt.Errorf("recovered API key but failed to persist config: %w", persistErr)
@@ -297,7 +297,7 @@ func resolveConfigPath(configPath string) (string, error) {
 	return configpath.ResolveConfigPath()
 }
 
-func persistConfigUpdates(configPath, apiURL string, updates map[string]string) error {
+func persistConfigUpdates(configPath string, updates map[string]string) error {
 	resolvedConfigPath, err := resolveConfigPath(configPath)
 	if err != nil {
 		return err
@@ -310,11 +310,10 @@ func persistConfigUpdates(configPath, apiURL string, updates map[string]string) 
 		return err
 	}
 
-	if strings.TrimSpace(content) == "" && strings.TrimSpace(apiURL) != "" {
-		content = cfgutil.UpsertQuotedConfigValue(content, "api_url", apiURL)
-	}
-
 	for key, value := range updates {
+		if strings.EqualFold(strings.TrimSpace(key), "api_url") {
+			return fmt.Errorf("api_url updates are not allowed in auth recovery persistence")
+		}
 		if strings.TrimSpace(value) == "" {
 			continue
 		}

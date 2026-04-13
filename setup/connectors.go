@@ -26,7 +26,12 @@ func redactConnectorErrorBody(body []byte, secrets ...string) string {
 }
 
 // ValidateGeminiKey checks the key against LiveReview's validate-key endpoint.
-func ValidateGeminiKey(result *SetupResult, geminiKey string) (bool, string, error) {
+func ValidateGeminiKey(result *SetupResult, geminiKey string, apiURL string) (bool, string, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = CloudAPIURL
+	}
+
 	reqBody := ValidateKeyRequest{
 		Provider: "gemini",
 		APIKey:   geminiKey,
@@ -34,7 +39,7 @@ func ValidateGeminiKey(result *SetupResult, geminiKey string) (bool, string, err
 	}
 
 	client := network.NewSetupClient(30 * time.Second)
-	resp, err := network.SetupValidateConnectorKey(client, CloudAPIURL, result.OrgID, reqBody, result.AccessToken)
+	resp, err := network.SetupValidateConnectorKey(client, apiURL, result.OrgID, reqBody, result.AccessToken)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to validate key: %w", err)
 	}
@@ -52,7 +57,12 @@ func ValidateGeminiKey(result *SetupResult, geminiKey string) (bool, string, err
 }
 
 // CreateGeminiConnector creates a Gemini AI connector in LiveReview.
-func CreateGeminiConnector(result *SetupResult, geminiKey string) error {
+func CreateGeminiConnector(result *SetupResult, geminiKey string, apiURL string) error {
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = CloudAPIURL
+	}
+
 	reqBody := CreateConnectorRequest{
 		ProviderName:  "gemini",
 		APIKey:        geminiKey,
@@ -62,7 +72,7 @@ func CreateGeminiConnector(result *SetupResult, geminiKey string) error {
 	}
 
 	client := network.NewSetupClient(30 * time.Second)
-	resp, err := network.SetupCreateConnector(client, CloudAPIURL, result.OrgID, reqBody, result.AccessToken)
+	resp, err := network.SetupCreateConnector(client, apiURL, result.OrgID, reqBody, result.AccessToken)
 	if err != nil {
 		return fmt.Errorf("failed to create connector: %w", err)
 	}

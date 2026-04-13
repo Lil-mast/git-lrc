@@ -1,9 +1,10 @@
 import { LOGO_DATA_URI } from '/static/components/utils.js';
 import { dedupeIdentityLines, getDisplayName, getInitials } from '/static/ui-connectors/session-utils.js';
+import { UsageChip } from '/static/components/UsageChip.js';
 
 const { html, useEffect, useState } = window.preact;
 
-export function HeaderNav({ activePath, session, reauthInProgress, onReauthenticate }) {
+export function HeaderNav({ activePath, session, reauthInProgress, orgSwitching, onReauthenticate, onSwitchOrg }) {
   const homeActive = activePath === '/home';
   const connectorsActive = activePath.startsWith('/connectors');
   const authenticated = Boolean(session && session.authenticated);
@@ -18,6 +19,8 @@ export function HeaderNav({ activePath, session, reauthInProgress, onReauthentic
   const secondaryLine = identityLines[1] || '';
   const tertiaryLine = identityLines[2] || '';
   const profileTitle = identityLines.length > 0 ? identityLines.join(' | ') : 'Profile';
+  const organizations = Array.isArray(session && session.organizations) ? session.organizations : [];
+  const selectedOrgID = String((session && session.org_id) || '');
 
   useEffect(() => {
     setAvatarFailed(false);
@@ -38,18 +41,43 @@ export function HeaderNav({ activePath, session, reauthInProgress, onReauthentic
 
         <div class="header-right">
           ${authenticated ? html`
-            <a class="profile-chip" href="#/profile" title=${profileTitle}>
-              ${avatarURL && !avatarFailed
-                ? html`<img class="profile-chip-avatar" src=${avatarURL} alt=${displayName} onError=${() => setAvatarFailed(true)} />`
-                : html`<div class="profile-chip-avatar profile-chip-fallback">${initials}</div>`}
-              <div class="profile-chip-text">
-                <div class="profile-chip-name">${primaryLine}</div>
-                ${secondaryLine ? html`<div class="profile-chip-meta">${secondaryLine}</div>` : ''}
-                ${tertiaryLine ? html`<div class="profile-chip-org">${tertiaryLine}</div>` : ''}
+            <div class="header-right-stack">
+              <div class="org-context-switcher">
+                <label class="org-context-label" for="org-context-select">Org</label>
+                <select
+                  id="org-context-select"
+                  class="org-context-select"
+                  value=${selectedOrgID}
+                  disabled=${orgSwitching || organizations.length === 0}
+                  onChange=${(event) => onSwitchOrg && onSwitchOrg(event.target.value)}
+                  title=${organizations.length === 0 ? 'No organizations available' : 'Switch organization context'}
+                >
+                  ${organizations.length === 0
+                    ? html`<option value="">No organizations</option>`
+                    : html`
+                      ${selectedOrgID ? '' : html`<option value="">Select organization</option>`}
+                      ${organizations.map((org) => html`
+                        <option key=${String(org.id)} value=${String(org.id)}>${org.name}</option>
+                      `)}
+                    `}
+                </select>
               </div>
-            </a>
+
+              <${UsageChip} key=${`usage-${selectedOrgID || 'none'}`} endpoint="/api/ui/usage-chip" />
+              <a class="profile-chip" href="#/profile" title=${profileTitle}>
+                ${avatarURL && !avatarFailed
+                  ? html`<img class="profile-chip-avatar" src=${avatarURL} alt=${displayName} onError=${() => setAvatarFailed(true)} />`
+                  : html`<div class="profile-chip-avatar profile-chip-fallback">${initials}</div>`}
+                <div class="profile-chip-text">
+                  <div class="profile-chip-name">${primaryLine}</div>
+                  ${secondaryLine ? html`<div class="profile-chip-meta">${secondaryLine}</div>` : ''}
+                  ${tertiaryLine ? html`<div class="profile-chip-org">${tertiaryLine}</div>` : ''}
+                </div>
+              </a>
+            </div>
           ` : html`
             <div class="header-auth-actions">
+              <${UsageChip} endpoint="/api/ui/usage-chip" />
               <div class="session-pill session-bad" title=${sessionHint}>Not Authenticated</div>
               <button class="secondary" disabled=${reauthInProgress} onClick=${onReauthenticate}>
                 ${reauthInProgress ? 'Signing in...' : 'Sign in'}

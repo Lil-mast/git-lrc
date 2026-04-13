@@ -75,8 +75,9 @@ func formatLiveReviewTechnicalDetails(rawBody string) string {
 	}
 
 	var payload struct {
-		Error     string `json:"error"`
-		ErrorCode string `json:"error_code"`
+		Error     string                         `json:"error"`
+		ErrorCode string                         `json:"error_code"`
+		Envelope  *reviewmodel.PlanUsageEnvelope `json:"envelope"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 		return trimmed
@@ -88,6 +89,11 @@ func formatLiveReviewTechnicalDetails(rawBody string) string {
 	}
 	if strings.TrimSpace(payload.Error) != "" {
 		lines = append(lines, fmt.Sprintf("error: %s", payload.Error))
+	}
+	if payload.Envelope != nil {
+		for _, line := range formatEnvelopeUsageLines(payload.Envelope) {
+			lines = append(lines, line)
+		}
 	}
 	if len(lines) == 0 {
 		return trimmed
@@ -332,6 +338,10 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 					return fmt.Errorf("failed to read input during 413 handling: %w (original error: %v)", rErr, err)
 				}
 				response = strings.ToLower(strings.TrimSpace(response))
+				if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusForbidden || apiErr.StatusCode == http.StatusTooManyRequests) {
+					fmt.Printf("\n⚠️  Review submission blocked by LiveReview limits.\n")
+					fmt.Printf("   %s\n\n", formatLiveReviewTechnicalDetails(apiErr.Body))
+				}
 
 				if response == "y" || response == "yes" {
 					fmt.Println("Proceeding with skipped review...")
@@ -415,6 +425,9 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 		}
 		if reviewURL != "" {
 			fmt.Printf("Review link: %s\n", highlightURL(reviewURL))
+		}
+		if submitResp.Envelope != nil {
+			printEnvelopeUsageSummary("submission", submitResp.Envelope)
 		}
 	}
 
@@ -549,6 +562,10 @@ func runReviewWithOptions(opts reviewopts.Options) error {
 					return
 				}
 				state.ServeHTTP(w, r)
+			})
+
+			mux.HandleFunc("/api/runtime/usage-chip", func(w http.ResponseWriter, r *http.Request) {
+				handleRuntimeUsageChip(w, r, config, verbose)
 			})
 
 			if runningDraftHub != nil {
@@ -1473,6 +1490,10 @@ func renderPretty(result *reviewmodel.DiffReviewResponse) error {
 	fmt.Println("LIVEREVIEW RESULTS")
 	fmt.Println(strings.Repeat("=", 80))
 
+	if result.Envelope != nil {
+		printEnvelopeUsageSummary("result", result.Envelope)
+	}
+
 	if result.Summary != "" {
 		fmt.Println("\nSummary:")
 		fmt.Println(result.Summary)
@@ -1520,6 +1541,74 @@ func renderPretty(result *reviewmodel.DiffReviewResponse) error {
 	fmt.Println(strings.Repeat("=", 80) + "\n")
 
 	return nil
+}
+
+func printEnvelopeUsageSummary(label string, envelope *reviewmodel.PlanUsageEnvelope) {
+	if envelope == nil {
+		return
+	}
+	fmt.Printf("\nUsage (%s):\n", label)
+	for _, line := range formatEnvelopeUsageLines(envelope) {
+		fmt.Printf("  - %s\n", line)
+	}
+}
+
+func formatEnvelopeUsageLines(envelope *reviewmodel.PlanUsageEnvelope) []string {
+	if envelope == nil {
+		return nil
+	}
+	lines := make([]string, 0, 12)
+	if envelope.PlanCode != "" {
+		lines = append(lines, fmt.Sprintf("plan_code: %s", envelope.PlanCode))
+	}
+	if envelope.PlanCode == "free_30k" {
+		lines = append(lines, "ai_mode: BYOK required on free plan")
+	} else if envelope.PlanCode == "team_32usd" {
+		lines = append(lines, "ai_mode: Auto by default on team plan (BYOK optional)")
+	}
+	if envelope.UsagePercent != nil {
+		lines = append(lines, fmt.Sprintf("usage_percent: %d%%", *envelope.UsagePercent))
+	}
+	if envelope.LOCUsedMonth != nil || envelope.LOCLimitMonth != nil || envelope.LOCRemainMonth != nil {
+		used := "?"
+		limit := "?"
+		remain := "?"
+		if envelope.LOCUsedMonth != nil {
+			used = fmt.Sprintf("%d", *envelope.LOCUsedMonth)
+		}
+		if envelope.LOCLimitMonth != nil {
+			limit = fmt.Sprintf("%d", *envelope.LOCLimitMonth)
+		}
+		if envelope.LOCRemainMonth != nil {
+			remain = fmt.Sprintf("%d", *envelope.LOCRemainMonth)
+		}
+		lines = append(lines, fmt.Sprintf("loc_used/limit/remaining: %s/%s/%s", used, limit, remain))
+	}
+	if envelope.ResetAt != "" {
+		lines = append(lines, fmt.Sprintf("reset_at: %s", envelope.ResetAt))
+	}
+	if envelope.ThresholdState != "" {
+		lines = append(lines, fmt.Sprintf("threshold_state: %s", envelope.ThresholdState))
+	}
+	if envelope.TrialReadOnly {
+		lines = append(lines, "trial_readonly: true")
+	}
+	if envelope.Blocked {
+		lines = append(lines, "blocked: true")
+	}
+	if envelope.OperationBillableLOC != nil {
+		lines = append(lines, fmt.Sprintf("operation_billable_loc: %d", *envelope.OperationBillableLOC))
+	}
+	if envelope.OperationType != "" {
+		lines = append(lines, fmt.Sprintf("operation_type: %s", envelope.OperationType))
+	}
+	if envelope.AIExecutionMode != "" {
+		lines = append(lines, fmt.Sprintf("ai_execution_mode: %s", envelope.AIExecutionMode))
+	}
+	if envelope.AIExecutionSource != "" {
+		lines = append(lines, fmt.Sprintf("ai_execution_source: %s", envelope.AIExecutionSource))
+	}
+	return lines
 }
 
 func countTotalComments(files []reviewmodel.DiffReviewFileResult) int {

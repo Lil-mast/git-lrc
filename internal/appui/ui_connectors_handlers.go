@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/HexmosTech/git-lrc/internal/reviewopts"
@@ -75,14 +76,47 @@ func (s *connectorManagerServer) handleSessionStatus(w http.ResponseWriter, r *h
 		UserID:         userID,
 		OrgID:          orgID,
 		OrgName:        orgName,
+		Organizations:  make([]uicfg.SessionOrganization, 0),
 		APIURL:         apiURL,
 	}
 
-	if jwt == "" || orgID == "" {
+	orgsResult, orgsErr := s.fetchSessionOrganizations()
+	if orgsErr == nil && orgsResult != nil {
+		status.Organizations = orgsResult.Organizations
+		if strings.TrimSpace(orgsResult.JWT) != "" {
+			jwt = strings.TrimSpace(orgsResult.JWT)
+		}
+		if status.OrgName == "" && strings.TrimSpace(status.OrgID) != "" {
+			for _, org := range orgsResult.Organizations {
+				if status.OrgID == strconv.FormatInt(org.ID, 10) {
+					status.OrgName = strings.TrimSpace(org.Name)
+					break
+				}
+			}
+		}
+	}
+
+	if jwt == "" {
 		if configErr != "" {
 			status.Message = configErr
+		} else if orgsErr != nil {
+			status.Message = orgsErr.Error()
 		} else {
 			status.Message = "not authenticated"
+		}
+		writeJSON(w, http.StatusOK, status)
+		return
+	}
+
+	if strings.TrimSpace(orgID) == "" {
+		status.Authenticated = true
+		if len(status.Organizations) > 0 {
+			status.Message = "organization context required. Select organization in header."
+		} else if orgsErr != nil {
+			status.Authenticated = false
+			status.Message = orgsErr.Error()
+		} else {
+			status.Message = "organization context missing"
 		}
 		writeJSON(w, http.StatusOK, status)
 		return
@@ -124,6 +158,7 @@ func (s *connectorManagerServer) handleSessionStatus(w http.ResponseWriter, r *h
 		status.Authenticated = true
 		status.SessionExpired = false
 		status.Message = "authenticated"
+		status.OrgID = strings.TrimSpace(orgID)
 		writeJSON(w, http.StatusOK, status)
 		return
 	}
@@ -138,14 +173,22 @@ func (s *connectorManagerServer) handleReauthenticate(w http.ResponseWriter, r *
 		return
 	}
 
+	s.mu.Lock()
+	configPath := strings.TrimSpace(s.cfg.ConfigPath)
+	apiURL := strings.TrimSpace(s.cfg.APIURL)
+	s.mu.Unlock()
+	if apiURL == "" {
+		apiURL = reviewopts.DefaultAPIURL
+	}
+
 	slog := newSetupLog()
-	result, err := runHexmosLoginFlow(slog)
+	result, err := runHexmosLoginFlow(slog, apiURL)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("reauthentication failed: %v", err))
 		return
 	}
 
-	if err := writeConfig(result); err != nil {
+	if err := persistReauthSessionToConfig(configPath, apiURL, result); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to persist session: %v", err))
 		return
 	}
@@ -153,7 +196,7 @@ func (s *connectorManagerServer) handleReauthenticate(w http.ResponseWriter, r *
 	_ = storage.RemoveReauthLogFile(slog.logFile)
 
 	s.mu.Lock()
-	s.cfg.APIURL = cloudAPIURL
+	s.cfg.APIURL = apiURL
 	s.cfg.JWT = strings.TrimSpace(result.AccessToken)
 	s.cfg.RefreshJWT = strings.TrimSpace(result.RefreshToken)
 	s.cfg.OrgID = strings.TrimSpace(result.OrgID)
@@ -178,7 +221,7 @@ func (s *connectorManagerServer) handleReauthenticate(w http.ResponseWriter, r *
 		UserID:         strings.TrimSpace(result.UserID),
 		OrgID:          strings.TrimSpace(result.OrgID),
 		OrgName:        strings.TrimSpace(result.OrgName),
-		APIURL:         cloudAPIURL,
+		APIURL:         apiURL,
 		Message:        "reauthentication complete",
 	})
 }

@@ -69,6 +69,7 @@ func main() {
 		RunAttestationTrailer: appcore.RunAttestationTrailer,
 		RunSetup:              appui.RunSetup,
 		RunUI:                 appui.RunUI,
+		RunUsageInspect:       appcore.RunUsageInspect,
 	})
 
 	if err := app.Run(os.Args); err != nil {

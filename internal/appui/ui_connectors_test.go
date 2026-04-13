@@ -94,3 +94,56 @@ refresh_token = "old-refresh"
 		t.Fatalf("refresh token value was not updated")
 	}
 }
+
+func TestPersistReauthSessionToConfigPreservesAPIURL(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".lrc.toml")
+
+	original := `api_key = "old-key"
+api_url = "http://localhost:8888"
+custom_setting = "keep-me"
+jwt = "old-jwt"
+`
+	if err := os.WriteFile(configPath, []byte(original), 0600); err != nil {
+		t.Fatalf("write original config: %v", err)
+	}
+
+	result := &setupResult{
+		PlainAPIKey:  "new-key",
+		Email:        "user@example.com",
+		FirstName:    "Jane",
+		LastName:     "Doe",
+		AvatarURL:    "https://cdn.hexmos.com/u/jane.png",
+		UserID:       "u-1",
+		OrgID:        "o-1",
+		OrgName:      "Acme",
+		AccessToken:  "new-jwt",
+		RefreshToken: "new-refresh",
+	}
+
+	if err := persistReauthSessionToConfig(configPath, cloudAPIURL, result); err != nil {
+		t.Fatalf("persist reauth session: %v", err)
+	}
+
+	updatedBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read updated config: %v", err)
+	}
+	updated := string(updatedBytes)
+
+	if !strings.Contains(updated, `api_url = "http://localhost:8888"`) {
+		t.Fatalf("expected existing api_url to be preserved")
+	}
+	if !strings.Contains(updated, `custom_setting = "keep-me"`) {
+		t.Fatalf("expected unrelated config fields to be preserved")
+	}
+	if !strings.Contains(updated, `api_key = "new-key"`) {
+		t.Fatalf("expected api_key to be updated")
+	}
+	if !strings.Contains(updated, `jwt = "new-jwt"`) {
+		t.Fatalf("expected jwt to be updated")
+	}
+	if !strings.Contains(updated, `refresh_token = "new-refresh"`) {
+		t.Fatalf("expected refresh_token to be updated")
+	}
+}
