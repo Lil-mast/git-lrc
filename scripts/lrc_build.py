@@ -263,6 +263,8 @@ class LRCBuilder:
         
         # Build command
         env = os.environ.copy()
+        # Guard against shell-level GOROOT skew (stale toolchain paths).
+        env.pop("GOROOT", None)
         env["CGO_ENABLED"] = "0"
         env["GOOS"] = goos
         env["GOARCH"] = goarch

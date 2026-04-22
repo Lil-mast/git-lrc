@@ -35,3 +35,5 @@ go.work.sum
 /lrc
 /dist/
 security_issues/
+
+scripts/__pycache__/
