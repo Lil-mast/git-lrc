@@ -19,9 +19,7 @@ import (
 	"github.com/HexmosTech/git-lrc/storage"
 )
 
-// ErrAuthHandled is a sentinel error indicating that an authentication failure
-// has already been handled visually (instructions printed) and should not be
-// logged again by the top-level error handler.
+// ErrAuthHandled indicates an auth failure already handled visually to suppress redundant logs.
 var ErrAuthHandled = errors.New("authentication failure already handled")
 
 const liveReviewAPIKeyInvalidCode = "LIVE_REVIEW_API_KEY_INVALID"
@@ -246,7 +244,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	}
 	fmt.Println("Session refreshed and tokens persisted to ~/.lrc.toml.")
 
-	newKey, createStatus, createBody, err = createAPIKeyWithJWT(config.APIURL, config.OrgID, newJWT)
+	newKey, createStatus, createBody, err = createAPIKeyWithJWT(updated.APIURL, updated.OrgID, updated.JWT)
 	if err != nil {
 		diag.FailureReason = fmt.Sprintf("create API key failed after refresh: status=%d", createStatus)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
