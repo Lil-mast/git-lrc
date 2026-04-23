@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"errors"
+	"fmt"
 	"os"
 
 	cmdapp "github.com/HexmosTech/git-lrc/cmd"
@@ -72,7 +73,11 @@ func main() {
 	})
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+		if errors.Is(err, appcore.ErrAuthHandled) {
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }
 

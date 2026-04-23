@@ -19,6 +19,11 @@ import (
 	"github.com/HexmosTech/git-lrc/storage"
 )
 
+// ErrAuthHandled is a sentinel error indicating that an authentication failure
+// has already been handled visually (instructions printed) and should not be
+// logged again by the top-level error handler.
+var ErrAuthHandled = errors.New("authentication failure already handled")
+
 const liveReviewAPIKeyInvalidCode = "LIVE_REVIEW_API_KEY_INVALID"
 
 type createAPIKeyRuntimeRequest struct {
@@ -100,7 +105,7 @@ func submitReviewWithRecovery(config Config, base64Diff, repoName string, verbos
 
 	recoveredConfig, recErr := recoverAPIKeyAndTokens(config, "submit")
 	if recErr != nil {
-		return reviewmodel.DiffReviewCreateResponse{}, config, fmt.Errorf("auto-recovery failed after %s: %w", liveReviewAPIKeyInvalidCode, recErr)
+		return reviewmodel.DiffReviewCreateResponse{}, config, ErrAuthHandled
 	}
 
 	fmt.Println("Retrying review submission with refreshed credentials...")
@@ -122,7 +127,7 @@ func pollReviewWithRecovery(config Config, reviewID string, pollInterval, timeou
 
 	recoveredConfig, recErr := recoverAPIKeyAndTokens(config, "poll")
 	if recErr != nil {
-		return nil, config, fmt.Errorf("auto-recovery failed after %s: %w", liveReviewAPIKeyInvalidCode, recErr)
+		return nil, config, ErrAuthHandled
 	}
 
 	fmt.Println("Retrying review polling with refreshed credentials...")
@@ -131,6 +136,28 @@ func pollReviewWithRecovery(config Config, reviewID string, pollInterval, timeou
 		return nil, recoveredConfig, retryErr
 	}
 	return retryResult, recoveredConfig, nil
+}
+
+func highlightCommand(cmd string) string {
+	return "\033[36m" + cmd + "\033[0m"
+}
+
+func printManualReauthInstructions() {
+	const (
+		cReset  = "\033[0m"
+		cBold   = "\033[1m"
+		cYellow = "\033[33m"
+		cDim    = "\033[2m"
+	)
+
+	fmt.Println()
+	fmt.Printf("  %s%s🔐 MANUAL RE-AUTHENTICATION REQUIRED%s\n", cBold, cYellow, cReset)
+	fmt.Printf("  %s─────────────────────────────────────────────────────%s\n", cDim, cReset)
+	fmt.Println()
+	fmt.Printf("  1. Open the LRC UI by running: %s\n", highlightCommand("lrc ui"))
+	fmt.Printf("  2. Click the %sRe-authenticate%s button\n", cBold, cReset)
+	fmt.Printf("  3. Once authenticated, run the command again to continue\n")
+	fmt.Println()
 }
 
 func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
@@ -158,6 +185,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 		diag.FailureReason = "missing org_id in config"
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
 		fmt.Println("Automatic recovery unavailable: missing org_id in ~/.lrc.toml.")
+		printManualReauthInstructions()
 		return config, fmt.Errorf("missing org_id in config")
 	}
 
@@ -186,6 +214,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	if createStatus != http.StatusUnauthorized || strings.TrimSpace(config.RefreshToken) == "" {
 		diag.FailureReason = fmt.Sprintf("create API key failed before refresh: status=%d", createStatus)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
+		printManualReauthInstructions()
 		return config, fmt.Errorf("create API key failed: %w body=%s", err, strings.TrimSpace(createBody))
 	}
 
@@ -195,6 +224,7 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	if refreshErr != nil {
 		diag.FailureReason = fmt.Sprintf("refresh token failed: status=%d", refreshStatus)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
+		printManualReauthInstructions()
 		return config, fmt.Errorf("failed to refresh session: %w body=%s", refreshErr, strings.TrimSpace(refreshBody))
 	}
 
@@ -216,11 +246,12 @@ func recoverAPIKeyAndTokens(config Config, phase string) (Config, error) {
 	}
 	fmt.Println("Session refreshed and tokens persisted to ~/.lrc.toml.")
 
-	newKey, createStatus, createBody, err = createAPIKeyWithJWT(updated.APIURL, updated.OrgID, updated.JWT)
+	newKey, createStatus, createBody, err = createAPIKeyWithJWT(config.APIURL, config.OrgID, newJWT)
 	if err != nil {
-		diag.FailureReason = fmt.Sprintf("create API key after refresh failed: status=%d", createStatus)
+		diag.FailureReason = fmt.Sprintf("create API key failed after refresh: status=%d", createStatus)
 		reportDiagnosticWriteError(persistAuthRecoveryDiagnostic(&diag, time.Since(started)))
-		return config, fmt.Errorf("failed to create API key after refresh: %w body=%s", err, strings.TrimSpace(createBody))
+		printManualReauthInstructions()
+		return config, fmt.Errorf("failed to create API key after session refresh: %w body=%s", err, strings.TrimSpace(createBody))
 	}
 
 	updated.APIKey = newKey
